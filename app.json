@@ -3,6 +3,7 @@
     "name": "Free360",
     "slug": "Free360",
     "version": "1.0.0",
+    "scheme": "free360",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -18,6 +19,27 @@
       },
       "predictiveBackGestureEnabled": false
     },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow Free360 to share your location with your circle while you travel.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Free360 to use your camera to scan a private circle invitation.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
+        }
+      ],
+      "expo-router",
+      "expo-secure-store",
+      "expo-font"
+    ],
     "web": {
       "favicon": "./assets/favicon.png"
     }
