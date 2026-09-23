@@ -8,7 +8,8 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "dev": "node --watch server.mjs"
+    "dev": "node --watch server.mjs",
+    "test": "node --test test.mjs"
   },
   "dependencies": {
     "ws": "^8.18.3"

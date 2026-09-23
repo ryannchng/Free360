@@ -4,6 +4,7 @@ import { fromByteArray, toByteArray } from 'base64-js';
 import nacl from 'tweetnacl';
 
 const CIRCLE_STORAGE_KEY = 'free360.circle.v1';
+const PENDING_SNAPSHOT_KEY = 'free360.pending-snapshot.v1';
 const PROTOCOL_VERSION = 1;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -42,9 +43,18 @@ export type SharedLocation = {
   recordedAt: string;
 };
 
+export type SharingPaused = { type: 'paused'; recordedAt: string };
+export type CheckIn = { type: 'checkin'; id: string; message: string; recordedAt: string };
+export type CircleSnapshot = SharedLocation | SharingPaused;
+export type CirclePayload = CircleSnapshot | CheckIn;
+
 export type RelaySubscription = {
   close: () => void;
 };
+
+export type CircleUpdate =
+  | { kind: 'snapshot'; deviceId: string; payload: CircleSnapshot }
+  | { kind: 'checkin'; deviceId: string; payload: CheckIn };
 
 type RelayResponse = {
   type: string;
@@ -103,27 +113,26 @@ export function normalizeRelayUrl(value: string) {
   return url.toString().replace(/\/$/, '');
 }
 
-export function encryptCirclePayload(payload: SharedLocation, encryptionKey: string): RelayEnvelope {
+export function encryptCirclePayload(payload: CirclePayload, encryptionKey: string): RelayEnvelope {
   const nonce = randomBytes(nacl.secretbox.nonceLength);
   const plaintext = textEncoder.encode(JSON.stringify(payload));
   const ciphertext = nacl.secretbox(plaintext, nonce, getKey(encryptionKey));
   return { version: PROTOCOL_VERSION, nonce: fromByteArray(nonce), ciphertext: fromByteArray(ciphertext) };
 }
 
-export function decryptCirclePayload(envelope: RelayEnvelope, encryptionKey: string): SharedLocation | null {
+export function decryptCirclePayload(envelope: RelayEnvelope, encryptionKey: string): CirclePayload | null {
   try {
     if (envelope.version !== PROTOCOL_VERSION) return null;
     const decrypted = nacl.secretbox.open(toByteArray(envelope.ciphertext), toByteArray(envelope.nonce), getKey(encryptionKey));
     if (!decrypted) return null;
     const parsed: unknown = JSON.parse(textDecoder.decode(decrypted));
-    if (!isRecord(parsed) || parsed.type !== 'location' || typeof parsed.latitude !== 'number' || typeof parsed.longitude !== 'number' || typeof parsed.recordedAt !== 'string') return null;
-    return {
-      type: 'location',
-      latitude: parsed.latitude,
-      longitude: parsed.longitude,
-      accuracy: typeof parsed.accuracy === 'number' ? parsed.accuracy : null,
-      recordedAt: parsed.recordedAt,
-    };
+    if (!isRecord(parsed) || typeof parsed.recordedAt !== 'string' || !Number.isFinite(Date.parse(parsed.recordedAt))) return null;
+    if (parsed.type === 'paused') return { type: 'paused', recordedAt: parsed.recordedAt };
+    if (parsed.type === 'checkin' && typeof parsed.id === 'string' && typeof parsed.message === 'string' && parsed.message.length <= 500) {
+      return { type: 'checkin', id: parsed.id, message: parsed.message, recordedAt: parsed.recordedAt };
+    }
+    if (parsed.type !== 'location' || typeof parsed.latitude !== 'number' || !Number.isFinite(parsed.latitude) || Math.abs(parsed.latitude) > 90 || typeof parsed.longitude !== 'number' || !Number.isFinite(parsed.longitude) || Math.abs(parsed.longitude) > 180) return null;
+    return { type: 'location', latitude: parsed.latitude, longitude: parsed.longitude, accuracy: typeof parsed.accuracy === 'number' ? parsed.accuracy : null, recordedAt: parsed.recordedAt };
   } catch {
     return null;
   }
@@ -159,6 +168,7 @@ class RelaySocket {
   private readonly socket: WebSocket;
   private readonly pending = new Map<string, { resolve: (message: RelayResponse) => void; reject: (reason: Error) => void; timeout: ReturnType<typeof setTimeout> }>();
   private readonly listeners = new Set<(message: RelayResponse) => void>();
+  private readonly closeListeners = new Set<() => void>();
   private requestNumber = 0;
 
   private constructor(socket: WebSocket) {
@@ -182,7 +192,10 @@ class RelaySocket {
       else pending.resolve(message);
     };
     socket.onerror = () => this.rejectAll(new Error('Could not connect to the self-hosted relay.'));
-    socket.onclose = () => this.rejectAll(new Error('The relay connection closed unexpectedly.'));
+    socket.onclose = () => {
+      this.rejectAll(new Error('The relay connection closed unexpectedly.'));
+      for (const listener of this.closeListeners) listener();
+    };
   }
 
   static connect(relayUrl: string) {
@@ -215,6 +228,10 @@ class RelaySocket {
 
   request(type: string, payload: Record<string, unknown> = {}) {
     return new Promise<RelayResponse>((resolve, reject) => {
+      if (this.socket.readyState !== WebSocket.OPEN) {
+        reject(new Error('The relay is disconnected.'));
+        return;
+      }
       const requestId = `mobile_${++this.requestNumber}_${Date.now()}`;
       const timeout = setTimeout(() => {
         this.pending.delete(requestId);
@@ -232,6 +249,11 @@ class RelaySocket {
   subscribe(listener: (message: RelayResponse) => void) {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  onClose(listener: () => void) {
+    this.closeListeners.add(listener);
+    return () => this.closeListeners.delete(listener);
   }
 
   private rejectAll(error: Error) {
@@ -311,40 +333,108 @@ export async function joinCircle(qrValue: string): Promise<CircleConfig> {
   return config;
 }
 
-export async function publishLocation(config: CircleConfig, location: Omit<SharedLocation, 'type' | 'recordedAt'>) {
-  const envelope = encryptCirclePayload({ type: 'location', ...location, recordedAt: new Date().toISOString() }, config.encryptionKey);
+type PendingSnapshot = { circleId: string; deviceId: string; id: string; envelope: RelayEnvelope };
+let snapshotQueue: Promise<void> = Promise.resolve();
+
+function serializeSnapshot<T>(operation: () => Promise<T>): Promise<T> {
+  const result = snapshotQueue.then(operation, operation);
+  snapshotQueue = result.then(() => undefined, () => undefined);
+  return result;
+}
+
+async function sendEnvelope(config: CircleConfig, envelope: RelayEnvelope, type: 'publish' | 'publish_event') {
   await withRelay(config.relayUrl, async (relay) => {
     await relay.request('authenticate', { circleId: config.circleId, deviceId: config.deviceId, deviceToken: config.deviceToken });
-    await relay.request('publish', { envelope });
+    await relay.request(type, { envelope });
   });
 }
 
-function receiveEncryptedLocation(message: Record<string, unknown>, encryptionKey: string, onLocation: (deviceId: string, location: SharedLocation) => void) {
+async function flushPendingSnapshotInner(config: CircleConfig) {
+  const raw = await SecureStore.getItemAsync(PENDING_SNAPSHOT_KEY);
+  if (!raw) return;
+  const pending: PendingSnapshot = JSON.parse(raw);
+  if (pending.circleId !== config.circleId || pending.deviceId !== config.deviceId) {
+    await SecureStore.deleteItemAsync(PENDING_SNAPSHOT_KEY);
+    return;
+  }
+  await sendEnvelope(config, pending.envelope, 'publish');
+  const current = await SecureStore.getItemAsync(PENDING_SNAPSHOT_KEY);
+  if (current && (JSON.parse(current) as PendingSnapshot).id === pending.id) await SecureStore.deleteItemAsync(PENDING_SNAPSHOT_KEY);
+}
+
+export function flushPendingSnapshot(config: CircleConfig) {
+  return serializeSnapshot(() => flushPendingSnapshotInner(config));
+}
+
+export function publishSnapshot(config: CircleConfig, payload: CircleSnapshot) {
+  return serializeSnapshot(async () => {
+    const pending: PendingSnapshot = { circleId: config.circleId, deviceId: config.deviceId, id: randomId(), envelope: encryptCirclePayload(payload, config.encryptionKey) };
+    await SecureStore.setItemAsync(PENDING_SNAPSHOT_KEY, JSON.stringify(pending));
+    await flushPendingSnapshotInner(config);
+  });
+}
+
+export function publishLocation(config: CircleConfig, location: Omit<SharedLocation, 'type' | 'recordedAt'>, recordedAt = new Date().toISOString()) {
+  return publishSnapshot(config, { type: 'location', ...location, recordedAt });
+}
+
+export function publishPaused(config: CircleConfig) {
+  return publishSnapshot(config, { type: 'paused', recordedAt: new Date().toISOString() });
+}
+
+export async function publishCheckIn(config: CircleConfig, message: string): Promise<CheckIn> {
+  const payload: CheckIn = { type: 'checkin', id: randomId(), message: message.trim().slice(0, 500), recordedAt: new Date().toISOString() };
+  await sendEnvelope(config, encryptCirclePayload(payload, config.encryptionKey), 'publish_event');
+  return payload;
+}
+
+function receiveEncryptedUpdate(message: Record<string, unknown>, encryptionKey: string, onUpdate: (update: CircleUpdate) => void) {
   if (typeof message.senderDeviceId !== 'string' || !isRecord(message.envelope)) return;
   const envelope = message.envelope;
   if (envelope.version !== PROTOCOL_VERSION || typeof envelope.nonce !== 'string' || typeof envelope.ciphertext !== 'string') return;
-  const location = decryptCirclePayload({ version: PROTOCOL_VERSION, nonce: envelope.nonce, ciphertext: envelope.ciphertext }, encryptionKey);
-  if (location) onLocation(message.senderDeviceId, location);
+  const payload = decryptCirclePayload({ version: PROTOCOL_VERSION, nonce: envelope.nonce, ciphertext: envelope.ciphertext }, encryptionKey);
+  if (payload?.type === 'checkin') onUpdate({ kind: 'checkin', deviceId: message.senderDeviceId, payload });
+  else if (payload) onUpdate({ kind: 'snapshot', deviceId: message.senderDeviceId, payload });
 }
 
-export async function subscribeToCircle(config: CircleConfig, onLocation: (deviceId: string, location: SharedLocation) => void): Promise<RelaySubscription> {
-  const relay = await RelaySocket.connect(config.relayUrl);
-  const unsubscribe = relay.subscribe((message) => {
-    if (message.type === 'event') receiveEncryptedLocation(message, config.encryptionKey, onLocation);
-  });
-  try {
-    const response = await relay.request('authenticate', { circleId: config.circleId, deviceId: config.deviceId, deviceToken: config.deviceToken });
-    if (Array.isArray(response.snapshots)) {
-      for (const snapshot of response.snapshots) {
-        if (isRecord(snapshot)) receiveEncryptedLocation(snapshot, config.encryptionKey, onLocation);
-      }
+export function subscribeToCircle(config: CircleConfig, onUpdate: (update: CircleUpdate) => void, onConnectionChange: (connected: boolean) => void): RelaySubscription {
+  let closed = false;
+  let relay: RelaySocket | null = null;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let retryDelay = 1000;
+  const reconnect = () => {
+    if (closed) return;
+    onConnectionChange(false);
+    retryTimer = setTimeout(() => { void connect(); }, retryDelay);
+    retryDelay = Math.min(retryDelay * 2, 30000);
+  };
+  const connect = async () => {
+    if (closed) return;
+    let next: RelaySocket | null = null;
+    try {
+      next = await RelaySocket.connect(config.relayUrl);
+      if (closed) { next.close(); return; }
+      relay = next;
+      next.subscribe((message) => {
+        if (message.type === 'event' || message.type === 'activity_event') receiveEncryptedUpdate(message, config.encryptionKey, onUpdate);
+        if (message.type === 'removed') onConnectionChange(false);
+      });
+      next.onClose(() => { if (relay === next) relay = null; reconnect(); });
+      const response = await next.request('authenticate', { circleId: config.circleId, deviceId: config.deviceId, deviceToken: config.deviceToken });
+      if (closed) { next.close(); return; }
+      if (Array.isArray(response.snapshots)) for (const snapshot of response.snapshots) if (isRecord(snapshot)) receiveEncryptedUpdate(snapshot, config.encryptionKey, onUpdate);
+      if (Array.isArray(response.events)) for (const event of response.events) if (isRecord(event)) receiveEncryptedUpdate(event, config.encryptionKey, onUpdate);
+      onConnectionChange(true);
+      retryDelay = 1000;
+      void flushPendingSnapshot(config).catch((error) => console.warn('[Free360] Queued snapshot still waiting for relay:', error));
+    } catch (error) {
+      console.warn('[Free360] Relay subscription failed:', error);
+      if (next) next.close();
+      else reconnect();
     }
-  } catch (error) {
-    unsubscribe();
-    relay.close();
-    throw error;
-  }
-  return { close: () => { unsubscribe(); relay.close(); } };
+  };
+  void connect();
+  return { close: () => { closed = true; if (retryTimer) clearTimeout(retryTimer); relay?.close(); onConnectionChange(false); } };
 }
 
 export async function loadCircle() {

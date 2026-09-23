@@ -15,7 +15,8 @@ Location envelopes are encrypted on the phone before being sent. The relay store
 - random circle and device identifiers
 - hashes of relay credentials
 - expiry data for one-time invitations
-- the most recent encrypted envelope for each device
+- the most recent encrypted location-or-paused envelope for each device
+- up to 100 encrypted check-in events per circle
 
 It never receives a name, email address, unencrypted coordinates, or the circle encryption key.
 
@@ -69,6 +70,10 @@ The relay state is retained in Docker's `relay-data` volume. Back up that volume
 4. On the other phone, open Free360 and choose **I have an invitation QR**, then scan the code.
 5. Each phone can enable location sharing. The relay receives encrypted location envelopes only.
 
+Check-ins are real encrypted events: they are acknowledged by the relay before the app says they were sent, retained for the most recent 100 events, and replayed after reconnect. The relay cannot read their text. Locations are snapshots, not a route history.
+
+If the relay is temporarily unreachable, the app keeps only the latest encrypted location or paused status on the device and retries it after the relay reconnects. Intermediate location points are intentionally not retained. The map labels the relay as offline and marks locations stale after five minutes; a stale marker is **not** a safety confirmation. Pausing stops the native background task first, then queues an encrypted paused status if delivery fails. The app checks the native task registration on launch so its switch reflects background sharing that persisted across a restart.
+
 The owner can generate another invitation whenever a new person needs to join. No one creates a Free360 account at any point.
 
 ## Run the mobile app
@@ -86,6 +91,8 @@ npm start
 ```
 
 Expo Go can preview the interface, the map, QR scanning, secure storage, and foreground location. Continuous background location requires a development build because Expo Go does not support it.
+
+Background delivery depends on device permissions, OS scheduling, connectivity, and the relay being reachable. It is not guaranteed at a fixed interval, especially after a force-quit. Test on physical Android and iOS devices with a development build before relying on it. Free360 does not currently provide automatic safety alerts, arrival notifications, saved places, or emergency response.
 
 To test the complete background-location configuration, create a development build with EAS:
 

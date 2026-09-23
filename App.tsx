@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import * as TaskManager from 'expo-task-manager';
 import { usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -19,10 +18,8 @@ import {
   View,
 } from 'react-native';
 import MapView, { Marker, UrlTile } from 'react-native-maps';
-import { publishStoredLocation } from './src/lib/background-location';
-import { type CircleConfig, loadCircle, publishLocation, subscribeToCircle, type SharedLocation } from './src/lib/circle';
-
-const BACKGROUND_LOCATION_TASK = 'free360-background-location';
+import { BACKGROUND_LOCATION_TASK } from './src/lib/background-location';
+import { type CheckIn, type CircleConfig, type CircleSnapshot, loadCircle, publishCheckIn, publishLocation, publishPaused, subscribeToCircle } from './src/lib/circle';
 
 type Tab = 'map' | 'circle' | 'activity' | 'you';
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -38,6 +35,8 @@ type Member = {
   color: string;
   battery: number;
   isYou?: boolean;
+  isPaused?: boolean;
+  isStale?: boolean;
 };
 
 const COLORS = {
@@ -64,73 +63,15 @@ const INITIAL_REGION = {
   longitudeDelta: 0.024,
 };
 
-const members: Member[] = [
-  {
-    id: 'you',
-    name: 'You',
-    initials: 'JR',
-    role: 'Circle owner',
-    status: 'At work',
-    lastSeen: 'Live now',
-    coordinate: { latitude: 40.7428, longitude: -73.9912 },
-    color: COLORS.coral,
-    battery: 82,
-    isYou: true,
-  },
-  {
-    id: 'alex',
-    name: 'Alex Rivera',
-    initials: 'AR',
-    role: 'Partner',
-    status: 'At home',
-    lastSeen: 'Updated 2 min ago',
-    coordinate: { latitude: 40.7455, longitude: -73.9875 },
-    color: '#6B78E5',
-    battery: 64,
-  },
-  {
-    id: 'maya',
-    name: 'Maya Rivera',
-    initials: 'MR',
-    role: 'Daughter',
-    status: 'At school',
-    lastSeen: 'Updated 8 min ago',
-    coordinate: { latitude: 40.7385, longitude: -73.9951 },
-    color: '#F19A5A',
-    battery: 49,
-  },
-  {
-    id: 'sam',
-    name: 'Sam Rivera',
-    initials: 'SR',
-    role: 'Brother',
-    status: 'At the gym',
-    lastSeen: 'Updated 12 min ago',
-    coordinate: { latitude: 40.7478, longitude: -73.9943 },
-    color: '#49A995',
-    battery: 91,
-  },
-];
+const selfMember: Member = { id: 'you', name: 'You', initials: 'YO', role: 'You', status: 'Sharing paused', lastSeen: 'No location yet', coordinate: INITIAL_REGION, color: COLORS.coral, battery: 0, isYou: true };
+const STALE_AFTER_MS = 5 * 60 * 1000;
 
-TaskManager.defineTask<{ locations?: Location.LocationObject[] }>(
-  BACKGROUND_LOCATION_TASK,
-  async ({ data, error }) => {
-    if (error) {
-      console.warn('[Free360] Background location error:', error.message);
-      return;
-    }
-
-    const latestLocation = data?.locations?.[0];
-    if (latestLocation) {
-      try {
-        await publishStoredLocation(latestLocation);
-      } catch (publishError) {
-        // A background task must stay resilient to a temporarily unreachable home relay.
-        console.warn('[Free360] Could not publish background location:', publishError);
-      }
-    }
-  },
-);
+function ageLabel(recordedAt: string, now: number) {
+  const minutes = Math.max(0, Math.floor((now - Date.parse(recordedAt)) / 60000));
+  if (minutes < 1) return 'Updated less than a minute ago';
+  if (minutes < 60) return `Updated ${minutes} min ago`;
+  return `Updated ${Math.floor(minutes / 60)} hr ago`;
+}
 
 function Icon({ name, size = 21, color = COLORS.ink }: { name: IconName; size?: number; color?: string }) {
   return <Ionicons name={name} size={size} color={color} />;
@@ -157,29 +98,17 @@ function SectionTitle({ eyebrow, title, action, onAction }: { eyebrow?: string; 
   );
 }
 
-function Pill({ label, tone = 'mint' }: { label: string; tone?: 'mint' | 'coral' | 'blue' | 'yellow' }) {
-  const palette = {
-    mint: { backgroundColor: COLORS.mintSoft, color: COLORS.mint },
-    coral: { backgroundColor: COLORS.coralSoft, color: COLORS.coral },
-    blue: { backgroundColor: COLORS.blueSoft, color: COLORS.blue },
-    yellow: { backgroundColor: COLORS.yellowSoft, color: '#C88313' },
-  }[tone];
-
-  return <View style={[styles.pill, { backgroundColor: palette.backgroundColor }]}><View style={[styles.pillDot, { backgroundColor: palette.color }]} /><Text style={[styles.pillText, { color: palette.color }]}>{label}</Text></View>;
-}
-
 function Header({ circleName, onSettings }: { circleName: string; onSettings: () => void }) {
   return (
     <View style={styles.header}>
       <View style={styles.brandMark}><Icon name="navigate" size={17} color={COLORS.white} /></View>
       <View style={styles.brandCopy}><Text style={styles.brandName}>Free360</Text><Text style={styles.brandSubline}>{circleName.toUpperCase()}</Text></View>
-      <Pressable style={styles.headerIconButton} onPress={onSettings} hitSlop={8}><Icon name="notifications-outline" size={20} color={COLORS.ink} /><View style={styles.notificationDot} /></Pressable>
-      <Pressable style={styles.headerAvatarButton} onPress={onSettings} hitSlop={8}><Avatar member={members[0]} size={38} /></Pressable>
+      <Pressable style={styles.headerAvatarButton} onPress={onSettings} hitSlop={8}><Avatar member={selfMember} size={38} /></Pressable>
     </View>
   );
 }
 
-function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembers, onRequestLocation, onCheckIn, onRecenter, onOpenMember }: { currentCoordinate: { latitude: number; longitude: number }; locationEnabled: boolean; circleName: string; circleMembers: Member[]; onRequestLocation: () => void; onCheckIn: () => void; onRecenter: () => void; onOpenMember: (member: Member) => void }) {
+function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembers, relayConnected, onRequestLocation, onCheckIn, onRecenter, onOpenMember }: { currentCoordinate: { latitude: number; longitude: number }; locationEnabled: boolean; circleName: string; circleMembers: Member[]; relayConnected: boolean; onRequestLocation: () => void; onCheckIn: () => void; onRecenter: () => void; onOpenMember: (member: Member) => void }) {
   const mapRef = useRef<MapView>(null);
 
   useEffect(() => {
@@ -195,14 +124,14 @@ function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembe
     <View style={styles.mapScreen}>
       <MapView ref={mapRef} style={StyleSheet.absoluteFill} initialRegion={INITIAL_REGION} mapType={Platform.OS === 'android' ? 'none' : 'standard'} showsCompass={false} showsBuildings={false} showsPointsOfInterests={false} showsUserLocation={locationEnabled} toolbarEnabled={false}>
         <UrlTile urlTemplate="https://tile.openstreetmap.org/{z}/{x}/{y}.png" maximumZ={19} flipY={false} />
-        {circleMembers.map((member) => {
+        {circleMembers.filter((member) => !member.isPaused).map((member) => {
           const coordinate = member.isYou ? currentCoordinate : member.coordinate;
-          return <Marker key={member.id} coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} onPress={() => onOpenMember(member)} tracksViewChanges={false}><View style={[styles.mapMarker, { borderColor: member.color }]}><Text style={[styles.mapMarkerText, { color: member.color }]}>{member.initials}</Text></View></Marker>;
+          return <Marker key={member.id} coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} onPress={() => onOpenMember(member)} tracksViewChanges={false}><View style={[styles.mapMarker, member.isStale && styles.mapMarkerStale, { borderColor: member.color }]}><Text style={[styles.mapMarkerText, { color: member.color }]}>{member.initials}</Text></View></Marker>;
         })}
       </MapView>
 
       <View style={styles.mapTopOverlay}>
-        <View style={styles.safePill}><View style={styles.safeIcon}><Icon name="shield-checkmark" size={15} color={COLORS.mint} /></View><View><Text style={styles.safePillLabel}>EVERYONE SAFE</Text><Text style={styles.safePillValue}>Updated just now</Text></View><Icon name="chevron-forward" size={16} color={COLORS.muted} /></View>
+        <View style={styles.safePill}><View style={styles.safeIcon}><Icon name={relayConnected ? 'cloud-done-outline' : 'cloud-offline-outline'} size={15} color={relayConnected ? COLORS.mint : COLORS.yellow} /></View><View><Text style={styles.safePillLabel}>{!circleName ? 'NO CIRCLE YET' : relayConnected ? 'RELAY CONNECTED' : 'RELAY OFFLINE'}</Text><Text style={styles.safePillValue}>{!circleName ? 'Set up a relay to begin' : circleMembers.some((member) => member.isStale) ? 'Some locations are stale' : relayConnected ? 'Locations are not safety alerts' : 'Updates may be delayed'}</Text></View></View>
         {!locationEnabled && <Pressable style={styles.locationPrompt} onPress={onRequestLocation}><Icon name="location-outline" size={17} color={COLORS.coral} /><Text style={styles.locationPromptText}>Turn on location sharing</Text><Icon name="arrow-forward" size={16} color={COLORS.coral} /></Pressable>}
       </View>
 
@@ -211,9 +140,9 @@ function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembe
 
       <View style={styles.mapBottomCard}>
         <View style={styles.cardHandle} />
-        <View style={styles.mapBottomHeader}><View><Text style={styles.mapBottomEyebrow}>{circleName.toUpperCase()}</Text><Text style={styles.mapBottomTitle}>{circleMembers.length} member{circleMembers.length === 1 ? '' : 's'} connected</Text></View><View style={styles.connectedAvatars}>{circleMembers.slice(1, 4).map((member, index) => <Avatar key={member.id} member={member} size={34 - index * 2} />)}{circleMembers.length > 4 && <View style={styles.moreAvatar}><Text style={styles.moreAvatarText}>+{circleMembers.length - 4}</Text></View>}</View></View>
+        <View style={styles.mapBottomHeader}><View><Text style={styles.mapBottomEyebrow}>{(circleName || 'PRIVATE CIRCLE').toUpperCase()}</Text><Text style={styles.mapBottomTitle}>{circleMembers.length} known member{circleMembers.length === 1 ? '' : 's'}</Text></View><View style={styles.connectedAvatars}>{circleMembers.slice(1, 4).map((member, index) => <Avatar key={member.id} member={member} size={34 - index * 2} />)}{circleMembers.length > 4 && <View style={styles.moreAvatar}><Text style={styles.moreAvatarText}>+{circleMembers.length - 4}</Text></View>}</View></View>
         <View style={styles.mapBottomDivider} />
-        <View style={styles.quickActions}><Pressable style={styles.checkInButton} onPress={onCheckIn}><Icon name="checkmark-circle" size={19} color={COLORS.white} /><Text style={styles.checkInButtonText}>Check in</Text></Pressable><Pressable style={styles.shareButton} onPress={onRequestLocation}><Icon name="share-social-outline" size={19} color={COLORS.ink} /><Text style={styles.shareButtonText}>Share status</Text></Pressable></View>
+        <View style={styles.quickActions}><Pressable style={styles.checkInButton} onPress={onCheckIn}><Icon name="checkmark-circle" size={19} color={COLORS.white} /><Text style={styles.checkInButtonText}>Check in</Text></Pressable><Pressable style={styles.shareButton} onPress={onRequestLocation}><Icon name="location-outline" size={19} color={COLORS.ink} /><Text style={styles.shareButtonText}>Enable location</Text></Pressable></View>
       </View>
     </View>
   );
@@ -223,24 +152,22 @@ function CircleScreen({ circleMembers, circleName, onInvite, onOpenMember }: { c
   return (
     <ScrollView style={styles.contentScreen} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
       <SectionTitle eyebrow="YOUR CIRCLE" title={circleName} action="Manage" onAction={() => Alert.alert('Circle settings', 'Private-circle management is coming next.')} />
-      <View style={styles.circleHero}><View style={styles.circleHeroOrb}><Icon name="people" size={28} color={COLORS.white} /></View><View style={styles.circleHeroCopy}><Text style={styles.circleHeroTitle}>Everyone is in sync</Text><Text style={styles.circleHeroBody}>Your circle has {circleMembers.length} member{circleMembers.length === 1 ? '' : 's'}. Invite someone you trust to join.</Text></View><Pressable style={styles.circleInviteSmall} onPress={onInvite}><Icon name="add" size={19} color={COLORS.coral} /></Pressable></View>
+      <View style={styles.circleHero}><View style={styles.circleHeroOrb}><Icon name="people" size={28} color={COLORS.white} /></View><View style={styles.circleHeroCopy}><Text style={styles.circleHeroTitle}>Your private circle</Text><Text style={styles.circleHeroBody}>Known devices appear after they share a location. Invite someone you trust to join.</Text></View><Pressable style={styles.circleInviteSmall} onPress={onInvite}><Icon name="add" size={19} color={COLORS.coral} /></Pressable></View>
       <SectionTitle eyebrow="MEMBERS" title={`${circleMembers.length} ${circleMembers.length === 1 ? 'person' : 'people'}`} />
-      <View style={styles.memberList}>{circleMembers.map((member, index) => <Pressable key={member.id} style={[styles.memberRow, index === circleMembers.length - 1 && styles.memberRowLast]} onPress={() => onOpenMember(member)}><Avatar member={member} size={48} showDot={member.id !== 'maya'} /><View style={styles.memberCopy}><View style={styles.memberNameRow}><Text style={styles.memberName}>{member.name}</Text>{member.isYou && <Text style={styles.youLabel}>YOU</Text>}</View><Text style={styles.memberStatus}>{member.status} · {member.lastSeen}</Text></View><View style={styles.memberTrailing}>{member.battery > 0 && <View style={styles.batteryRow}><Icon name={member.battery > 25 ? 'battery-half' : 'battery-dead-outline'} size={15} color={member.battery > 25 ? COLORS.mint : COLORS.coral} /><Text style={styles.batteryText}>{member.battery}%</Text></View>}<Icon name="chevron-forward" size={18} color={COLORS.subtle} /></View></Pressable>)}</View>
+      <View style={styles.memberList}>{circleMembers.map((member, index) => <Pressable key={member.id} style={[styles.memberRow, index === circleMembers.length - 1 && styles.memberRowLast]} onPress={() => onOpenMember(member)}><Avatar member={member} size={48} /><View style={styles.memberCopy}><View style={styles.memberNameRow}><Text style={styles.memberName}>{member.name}</Text>{member.isYou && <Text style={styles.youLabel}>YOU</Text>}</View><Text style={styles.memberStatus}>{member.status} · {member.lastSeen}</Text></View><View style={styles.memberTrailing}><Icon name="chevron-forward" size={18} color={COLORS.subtle} /></View></Pressable>)}</View>
       <Pressable style={styles.inviteButton} onPress={onInvite}><Icon name="person-add-outline" size={19} color={COLORS.coral} /><Text style={styles.inviteButtonText}>Invite a circle member</Text><Icon name="arrow-forward" size={17} color={COLORS.coral} /></Pressable>
-      <SectionTitle eyebrow="PLACES" title="Saved places" action="See all" onAction={() => Alert.alert('Saved places', 'Home, school, and work can be added here in the next iteration.')} />
-      <View style={styles.placeCard}><View style={[styles.placeIcon, { backgroundColor: COLORS.coralSoft }]}><Icon name="home-outline" size={20} color={COLORS.coral} /></View><View style={styles.placeCopy}><Text style={styles.placeName}>Home</Text><Text style={styles.placeAddress}>24 W 23rd Street · Manhattan</Text></View><Icon name="chevron-forward" size={18} color={COLORS.subtle} /></View>
-      <View style={styles.placeCard}><View style={[styles.placeIcon, { backgroundColor: COLORS.blueSoft }]}><Icon name="briefcase-outline" size={20} color={COLORS.blue} /></View><View style={styles.placeCopy}><Text style={styles.placeName}>Work</Text><Text style={styles.placeAddress}>350 Fifth Avenue · Manhattan</Text></View><Icon name="chevron-forward" size={18} color={COLORS.subtle} /></View>
+      <Text style={styles.emptyNote}>Saved places and arrival alerts are not available yet.</Text>
     </ScrollView>
   );
 }
 
-function ActivityScreen({ onCheckIn }: { onCheckIn: () => void }) {
+function ActivityScreen({ onCheckIn, checkIns, circle }: { onCheckIn: () => void; checkIns: { deviceId: string; payload: CheckIn }[]; circle: CircleConfig | null }) {
   return (
     <ScrollView style={styles.contentScreen} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
-      <SectionTitle eyebrow="TODAY · MONDAY, SEP 21" title="Circle activity" />
-      <View style={styles.activitySummary}><View style={styles.activitySummaryIcon}><Icon name="pulse" size={22} color={COLORS.mint} /></View><View style={styles.activitySummaryCopy}><Text style={styles.activitySummaryTitle}>A quiet day in your circle</Text><Text style={styles.activitySummaryText}>No safety alerts or unusual activity.</Text></View><Pill label="All clear" /></View>
-      <Text style={styles.timelineLabel}>RECENT UPDATES</Text>
-      <View style={styles.timeline}><ActivityItem icon="location" tone="blue" time="12:42 PM" title="You arrived at Work" body="350 Fifth Avenue" /><ActivityItem icon="car" tone="coral" time="11:18 AM" title="Maya started a drive" body="12 min · 2.4 mi" /><ActivityItem icon="home" tone="mint" time="9:05 AM" title="Alex arrived at Home" body="24 W 23rd Street" /><ActivityItem icon="checkmark-circle" tone="yellow" time="8:31 AM" title="Maya checked in" body="'Made it to school!'" isLast /></View>
+      <SectionTitle eyebrow="ENCRYPTED UPDATES" title="Circle activity" />
+      <Text style={styles.emptyNote}>Check-ins sent through your relay appear here. This is not an emergency monitoring service.</Text>
+      <Text style={styles.timelineLabel}>RECENT CHECK-INS</Text>
+      {checkIns.length ? <View style={styles.timeline}>{checkIns.map(({ deviceId, payload }, index) => <ActivityItem key={payload.id} icon="checkmark-circle" tone="mint" time={new Date(payload.recordedAt).toLocaleString()} title={deviceId === circle?.deviceId ? 'You checked in' : `Member ${deviceId.slice(0, 6)} checked in`} body={payload.message || 'No note'} isLast={index === checkIns.length - 1} />)}</View> : <Text style={styles.emptyNote}>No check-ins yet.</Text>}
       <Pressable style={styles.fullWidthAction} onPress={onCheckIn}><Icon name="checkmark-circle-outline" size={19} color={COLORS.coral} /><Text style={styles.fullWidthActionText}>Send a check-in to your circle</Text><Icon name="arrow-forward" size={17} color={COLORS.coral} /></Pressable>
     </ScrollView>
   );
@@ -252,35 +179,30 @@ function ActivityItem({ icon, tone, time, title, body, isLast = false }: { icon:
   return <View style={styles.timelineItem}><View style={styles.timelineRail}><View style={[styles.timelineIcon, { backgroundColor: tone === 'blue' ? COLORS.blueSoft : tone === 'coral' ? COLORS.coralSoft : tone === 'mint' ? COLORS.mintSoft : COLORS.yellowSoft }]}><Icon name={iconName} size={17} color={palette} /></View>{!isLast && <View style={styles.timelineLine} />}</View><View style={styles.timelineCopy}><Text style={styles.timelineTime}>{time}</Text><Text style={styles.timelineTitle}>{title}</Text><Text style={styles.timelineBody}>{body}</Text></View></View>;
 }
 
-function YouScreen({ locationEnabled, backgroundReady, onToggleLocation, onBackgroundLocation, circle, onRelaySetup, onInvite, onJoin }: { locationEnabled: boolean; backgroundReady: boolean; onToggleLocation: () => void; onBackgroundLocation: () => void; circle: CircleConfig | null; onRelaySetup: () => void; onInvite: () => void; onJoin: () => void }) {
+function YouScreen({ locationEnabled, locationReady, backgroundReady, relayConnected, onToggleLocation, onBackgroundLocation, circle, onRelaySetup, onInvite, onJoin }: { locationEnabled: boolean; locationReady: boolean; backgroundReady: boolean; relayConnected: boolean; onToggleLocation: () => void; onBackgroundLocation: () => void; circle: CircleConfig | null; onRelaySetup: () => void; onInvite: () => void; onJoin: () => void }) {
   return (
     <ScrollView style={styles.contentScreen} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
-      <SectionTitle eyebrow="YOUR PROFILE" title="You" action="Edit" onAction={() => Alert.alert('Edit profile', 'Profile editing will be connected to accounts in the next step.')} />
-      <View style={styles.profileCard}><Avatar member={members[0]} size={68} /><View style={styles.profileCopy}><Text style={styles.profileName}>Jordan Rivera</Text><Text style={styles.profileEmail}>Local preview · no account yet</Text><View style={styles.profileStatus}><View style={styles.profileStatusDot} /><Text style={styles.profileStatusText}>Sharing with Northstar Circle</Text></View></View><Icon name="chevron-forward" size={19} color={COLORS.subtle} /></View>
+      <SectionTitle eyebrow="YOUR DEVICE" title="You" />
+      <View style={styles.profileCard}><Avatar member={selfMember} size={68} /><View style={styles.profileCopy}><Text style={styles.profileName}>This device</Text><Text style={styles.profileEmail}>No account required</Text><View style={styles.profileStatus}><View style={styles.profileStatusDot} /><Text style={styles.profileStatusText}>{circle ? locationEnabled ? 'Sharing with your circle' : 'Location sharing paused' : 'No circle configured'}</Text></View></View></View>
       <SectionTitle eyebrow="LOCATION" title="Sharing controls" />
       <View style={styles.settingsCard}>
-        <View style={styles.settingRow}><View style={[styles.settingIcon, { backgroundColor: COLORS.coralSoft }]}><Icon name="location" size={19} color={COLORS.coral} /></View><View style={styles.settingCopy}><Text style={styles.settingTitle}>Location sharing</Text><Text style={styles.settingDescription}>{locationEnabled ? 'Your circle can see your live location' : 'Your location is currently paused'}</Text></View><Switch value={locationEnabled} onValueChange={onToggleLocation} trackColor={{ false: '#D6DCE5', true: '#FFB8B1' }} thumbColor={locationEnabled ? COLORS.coral : '#FFFFFF'} /></View>
+        <View style={styles.settingRow}><View style={[styles.settingIcon, { backgroundColor: COLORS.coralSoft }]}><Icon name="location" size={19} color={COLORS.coral} /></View><View style={styles.settingCopy}><Text style={styles.settingTitle}>Location sharing</Text><Text style={styles.settingDescription}>{!locationReady ? 'Checking device sharing state…' : locationEnabled ? 'Location updates enabled on this device' : 'Location sharing is paused'}</Text></View><Switch value={locationEnabled} disabled={!locationReady} onValueChange={onToggleLocation} trackColor={{ false: '#D6DCE5', true: '#FFB8B1' }} thumbColor={locationEnabled ? COLORS.coral : '#FFFFFF'} /></View>
         <View style={styles.settingsDivider} />
-        <Pressable style={styles.settingRow} onPress={onBackgroundLocation}><View style={[styles.settingIcon, { backgroundColor: COLORS.blueSoft }]}><Icon name="navigate" size={19} color={COLORS.blue} /></View><View style={styles.settingCopy}><Text style={styles.settingTitle}>Background updates</Text><Text style={styles.settingDescription}>{backgroundReady ? 'Ready for a development build' : 'Works when the app is open in Expo Go'}</Text></View><View style={[styles.statusCheck, { backgroundColor: backgroundReady ? COLORS.mintSoft : COLORS.yellowSoft }]}><Icon name={backgroundReady ? 'checkmark' : 'information'} size={15} color={backgroundReady ? COLORS.mint : '#C88313'} /></View></Pressable>
+        <Pressable style={styles.settingRow} onPress={onBackgroundLocation}><View style={[styles.settingIcon, { backgroundColor: COLORS.blueSoft }]}><Icon name="navigate" size={19} color={COLORS.blue} /></View><View style={styles.settingCopy}><Text style={styles.settingTitle}>Background updates</Text><Text style={styles.settingDescription}>{backgroundReady ? 'Registered on this device' : 'Not active · development build required'}</Text></View><View style={[styles.statusCheck, { backgroundColor: backgroundReady ? COLORS.mintSoft : COLORS.yellowSoft }]}><Icon name={backgroundReady ? 'checkmark' : 'information'} size={15} color={backgroundReady ? COLORS.mint : '#C88313'} /></View></Pressable>
       </View>
       <View style={styles.privacyNote}><Icon name="lock-closed-outline" size={17} color={COLORS.muted} /><Text style={styles.privacyText}>Your location is shared only with members of your circle. You can pause sharing any time.</Text></View>
       <SectionTitle eyebrow="SELF-HOSTED" title="Private relay" action={circle?.isOwner ? 'Invite' : undefined} onAction={onInvite} />
       <View style={styles.settingsCard}>
         <Pressable style={styles.settingRow} onPress={onRelaySetup}>
           <View style={[styles.settingIcon, { backgroundColor: circle ? COLORS.mintSoft : COLORS.coralSoft }]}><Icon name={circle ? 'shield-checkmark-outline' : 'server-outline'} size={19} color={circle ? COLORS.mint : COLORS.coral} /></View>
-          <View style={styles.settingCopy}><Text style={styles.settingTitle}>{circle ? circle.circleName : 'Set up a private relay'}</Text><Text style={styles.settingDescription}>{circle ? `${circle.isOwner ? 'Circle owner' : 'Circle member'} · encrypted relay connected` : 'Host your own relay—no account or shared database'}</Text></View><Icon name="chevron-forward" size={18} color={COLORS.subtle} />
+          <View style={styles.settingCopy}><Text style={styles.settingTitle}>{circle ? circle.circleName : 'Set up a private relay'}</Text><Text style={styles.settingDescription}>{circle ? `${circle.isOwner ? 'Circle owner' : 'Circle member'} · relay ${relayConnected ? 'connected' : 'offline'}` : 'Host your own relay—no account or shared database'}</Text></View><Icon name="chevron-forward" size={18} color={COLORS.subtle} />
         </Pressable>
         {!circle && <><View style={styles.settingsDivider} /><Pressable style={styles.settingRow} onPress={onJoin}><View style={[styles.settingIcon, { backgroundColor: COLORS.blueSoft }]}><Icon name="qr-code-outline" size={19} color={COLORS.blue} /></View><View style={styles.settingCopy}><Text style={styles.settingTitle}>Join with invitation QR</Text><Text style={styles.settingDescription}>No sign-up needed</Text></View><Icon name="chevron-forward" size={18} color={COLORS.subtle} /></Pressable></>}
       </View>
-      <SectionTitle eyebrow="APP" title="Preferences" />
-      <View style={styles.settingsCard}><SettingLink icon="notifications-outline" title="Notifications" description="Alerts, check-ins, and arrival updates" /><View style={styles.settingsDivider} /><SettingLink icon="help-circle-outline" title="Help & support" description="Learn how Free360 keeps you connected" /><View style={styles.settingsDivider} /><SettingLink icon="shield-checkmark-outline" title="Privacy & safety" description="Your data and sharing choices" /></View>
+      <Text style={styles.emptyNote}>Notifications, saved places, and automatic safety alerts are not available in this MVP.</Text>
       <Text style={styles.versionText}>Free360 preview · v0.1.0</Text>
     </ScrollView>
   );
-}
-
-function SettingLink({ icon, title, description }: { icon: IconName; title: string; description: string }) {
-  return <View style={styles.settingRow}><View style={[styles.settingIcon, { backgroundColor: COLORS.canvas }]}><Icon name={icon} size={19} color={COLORS.ink} /></View><View style={styles.settingCopy}><Text style={styles.settingTitle}>{title}</Text><Text style={styles.settingDescription}>{description}</Text></View><Icon name="chevron-forward" size={18} color={COLORS.subtle} /></View>;
 }
 
 function BottomTabs({ activeTab, onTabChange }: { activeTab: Tab; onTabChange: (tab: Tab) => void }) {
@@ -307,15 +229,26 @@ export default function App() {
   const pathname = usePathname();
   const activeTab: Tab = pathname === '/circle' || pathname === '/activity' || pathname === '/you' ? pathname.slice(1) as Tab : 'map';
   const [locationEnabled, setLocationEnabled] = useState(false);
+  const [locationReady, setLocationReady] = useState(Platform.OS === 'web');
   const [backgroundReady, setBackgroundReady] = useState(false);
-  const [currentCoordinate, setCurrentCoordinate] = useState(members[0].coordinate);
+  const [currentCoordinate, setCurrentCoordinate] = useState<{ latitude: number; longitude: number }>({ latitude: INITIAL_REGION.latitude, longitude: INITIAL_REGION.longitude });
+  const [hasCurrentLocation, setHasCurrentLocation] = useState(false);
   const [circle, setCircle] = useState<CircleConfig | null>(null);
-  const [remoteLocations, setRemoteLocations] = useState<Record<string, SharedLocation>>({});
+  const [remoteSnapshots, setRemoteSnapshots] = useState<Record<string, CircleSnapshot>>({});
+  const [checkIns, setCheckIns] = useState<{ deviceId: string; payload: CheckIn }[]>([]);
+  const [relayConnected, setRelayConnected] = useState(false);
+  const [now, setNow] = useState(0);
   const [checkInVisible, setCheckInVisible] = useState(false);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [toast, setToast] = useState('');
   const watcher = useRef<Location.LocationSubscription | null>(null);
   const circleRef = useRef<CircleConfig | null>(null);
+
+  useEffect(() => {
+    const firstTick = setTimeout(() => setNow(Date.now()), 0);
+    const timer = setInterval(() => setNow(Date.now()), 30000);
+    return () => { clearTimeout(firstTick); clearInterval(timer); };
+  }, []);
 
   useEffect(() => {
     if (!toast) return;
@@ -326,47 +259,66 @@ export default function App() {
   useEffect(() => () => { watcher.current?.remove(); }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    if (Platform.OS === 'web') return;
+    void Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK).then(async (registered) => {
+      if (cancelled) return;
+      setBackgroundReady(registered);
+      setLocationEnabled(registered);
+      if (registered) {
+        const permission = await Location.getForegroundPermissionsAsync();
+        if (permission.granted && !watcher.current && !cancelled) {
+          watcher.current = await Location.watchPositionAsync({ accuracy: Location.Accuracy.Balanced, distanceInterval: 20, timeInterval: 15000 }, (position) => {
+            setCurrentCoordinate({ latitude: position.coords.latitude, longitude: position.coords.longitude });
+            setHasCurrentLocation(true);
+            const currentCircle = circleRef.current;
+            if (currentCircle) void publishLocation(currentCircle, { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy }, new Date(position.timestamp).toISOString()).catch((error) => console.warn('[Free360] Foreground location queued:', error));
+          });
+        }
+      }
+    }).catch((error) => console.warn('[Free360] Could not inspect background task:', error)).finally(() => { if (!cancelled) setLocationReady(true); });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
     void loadCircle().then((savedCircle) => {
-      setCircle(savedCircle);
+      if (circleRef.current?.circleId !== savedCircle?.circleId) {
+        setRemoteSnapshots({});
+        setCheckIns([]);
+        setRelayConnected(false);
+        setCircle(savedCircle);
+      }
       circleRef.current = savedCircle;
-    });
+    }).catch((error) => console.warn('[Free360] Could not load circle:', error));
   }, [pathname]);
 
   useEffect(() => {
-    if (!circle) {
-      setRemoteLocations({});
-      return;
-    }
-    let disposed = false;
-    let subscription: { close: () => void } | null = null;
-    void subscribeToCircle(circle, (deviceId, location) => {
-      if (!disposed && deviceId !== circle.deviceId) setRemoteLocations((current) => ({ ...current, [deviceId]: location }));
-    }).then((createdSubscription) => {
-      if (disposed) createdSubscription.close();
-      else subscription = createdSubscription;
-    }).catch((error) => console.warn('[Free360] Could not subscribe to relay updates:', error));
-    return () => {
-      disposed = true;
-      subscription?.close();
-    };
-  }, [circle?.circleId, circle?.deviceId, circle?.deviceToken, circle?.encryptionKey, circle?.relayUrl]);
+    if (!circle) return;
+    const subscription = subscribeToCircle(circle, (update) => {
+      if (update.kind === 'snapshot' && update.deviceId !== circle.deviceId) setRemoteSnapshots((current) => ({ ...current, [update.deviceId]: update.payload }));
+      if (update.kind === 'checkin') setCheckIns((current) => current.some((item) => item.payload.id === update.payload.id) ? current : [{ deviceId: update.deviceId, payload: update.payload }, ...current].sort((a, b) => Date.parse(b.payload.recordedAt) - Date.parse(a.payload.recordedAt)).slice(0, 100));
+    }, setRelayConnected);
+    return () => subscription.close();
+  }, [circle]);
 
   const mapMembers = useMemo(() => {
-    if (!circle) return members;
-    const localMember = { ...members[0], coordinate: currentCoordinate, status: locationEnabled ? 'Sharing securely' : 'Sharing paused' };
-    const remoteMembers = Object.entries(remoteLocations).map(([deviceId, location], index) => ({
+    if (!circle) return [];
+    const localMember = { ...selfMember, coordinate: currentCoordinate, role: circle.isOwner ? 'Circle owner' : 'Circle member', status: locationEnabled ? 'Location enabled' : 'Sharing paused', lastSeen: locationEnabled && hasCurrentLocation ? 'On this device' : 'No live location', isPaused: !locationEnabled || !hasCurrentLocation };
+    const remoteMembers = Object.entries(remoteSnapshots).map(([deviceId, snapshot], index) => ({
       id: deviceId,
-      name: `Circle member ${index + 1}`,
+      name: `Member ${deviceId.slice(0, 6)}`,
       initials: `M${index + 1}`,
       role: 'Private relay member',
-      status: 'Sharing securely',
-      lastSeen: `Updated ${new Date(location.recordedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`,
-      coordinate: { latitude: location.latitude, longitude: location.longitude },
+      status: snapshot.type === 'paused' ? 'Sharing paused' : now - Date.parse(snapshot.recordedAt) > STALE_AFTER_MS ? 'Location stale' : 'Location shared',
+      lastSeen: ageLabel(snapshot.recordedAt, now),
+      coordinate: snapshot.type === 'location' ? { latitude: snapshot.latitude, longitude: snapshot.longitude } : INITIAL_REGION,
       color: ['#6B78E5', '#F19A5A', '#49A995', '#4386F4'][index % 4],
       battery: 0,
+      isPaused: snapshot.type === 'paused',
+      isStale: snapshot.type === 'location' && now - Date.parse(snapshot.recordedAt) > STALE_AFTER_MS,
     }));
     return [localMember, ...remoteMembers];
-  }, [circle, currentCoordinate, locationEnabled, remoteLocations]);
+  }, [circle, currentCoordinate, hasCurrentLocation, locationEnabled, remoteSnapshots, now]);
 
   const shareLocation = (position: Location.LocationObject) => {
     const currentCircle = circleRef.current;
@@ -375,10 +327,11 @@ export default function App() {
       latitude: position.coords.latitude,
       longitude: position.coords.longitude,
       accuracy: position.coords.accuracy,
-    }).catch((error) => console.warn('[Free360] Could not publish foreground location:', error));
+    }, new Date(position.timestamp).toISOString()).catch((error) => console.warn('[Free360] Foreground location queued:', error));
   };
 
   const requestLocation = async () => {
+    if (!circleRef.current) { router.push('/relay'); return; }
     if (Platform.OS === 'web') {
       setToast('Location preview is available on a physical device.');
       return;
@@ -392,45 +345,58 @@ export default function App() {
 
       const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       setCurrentCoordinate({ latitude: current.coords.latitude, longitude: current.coords.longitude });
+      setHasCurrentLocation(true);
       shareLocation(current);
       if (!watcher.current) {
         watcher.current = await Location.watchPositionAsync({ accuracy: Location.Accuracy.Balanced, distanceInterval: 20, timeInterval: 15000 }, (position) => {
           setCurrentCoordinate({ latitude: position.coords.latitude, longitude: position.coords.longitude });
+          setHasCurrentLocation(true);
           shareLocation(position);
         });
       }
 
+      let backgroundStarted = false;
       try {
         const background = await Location.requestBackgroundPermissionsAsync();
         if (background.status === 'granted') {
-          await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, { accuracy: Location.Accuracy.Balanced, distanceInterval: 50, timeInterval: 30000, pausesUpdatesAutomatically: false, showsBackgroundLocationIndicator: true, foregroundService: { notificationTitle: 'Free360 location sharing', notificationBody: 'Your Northstar Circle can see your live location.', notificationColor: COLORS.coral } });
+          if (!await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK)) await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, { accuracy: Location.Accuracy.Balanced, distanceInterval: 50, timeInterval: 30000, pausesUpdatesAutomatically: false, showsBackgroundLocationIndicator: true, foregroundService: { notificationTitle: 'Free360 location sharing', notificationBody: 'Your circle can see your location.', notificationColor: COLORS.coral } });
+          backgroundStarted = true;
           setBackgroundReady(true);
         } else {
           setBackgroundReady(false);
-          setToast('Sharing is on while Free360 is open. Background access needs permission.');
         }
       } catch {
         setBackgroundReady(false);
-        setToast('Foreground sharing is on. Use a development build for background updates.');
       }
       setLocationEnabled(true);
-      setToast('Location sharing is on.');
+      setToast(backgroundStarted ? 'Location sharing is on, including background updates.' : 'Sharing while open. Background sharing needs permission and a development build.');
     } catch {
       setToast('We couldn’t access your location. Check device permissions.');
     }
   };
 
   const stopLocation = async () => {
-    watcher.current?.remove();
-    watcher.current = null;
     try {
       if (await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK)) await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
-    } catch {
-      // Expo Go does not expose the background service; foreground sharing can still stop cleanly.
+    } catch (error) {
+      if (backgroundReady) {
+        console.warn('[Free360] Could not stop background sharing:', error);
+        setToast('Could not stop background sharing. Check device settings and try again.');
+        return;
+      }
     }
+    watcher.current?.remove();
+    watcher.current = null;
     setLocationEnabled(false);
     setBackgroundReady(false);
-    setToast('Location sharing is paused.');
+    if (circleRef.current) {
+      try {
+        await publishPaused(circleRef.current);
+        setToast('Location sharing is paused.');
+      } catch {
+        setToast('Sharing stopped on this device. Paused status will sync when the relay reconnects.');
+      }
+    }
   };
 
   const toggleLocation = () => { if (locationEnabled) void stopLocation(); else void requestLocation(); };
@@ -445,20 +411,31 @@ export default function App() {
     }
     router.push('/invite');
   };
-  const checkIn = (message: string) => { setCheckInVisible(false); setToast(message || 'You checked in with your circle.'); };
+  const checkIn = async (message: string) => {
+    if (!circle) { setCheckInVisible(false); router.push('/relay'); return; }
+    try {
+      const payload = await publishCheckIn(circle, message);
+      setCheckIns((current) => [{ deviceId: circle.deviceId, payload }, ...current].slice(0, 100));
+      setCheckInVisible(false);
+      setToast('Check-in sent to your circle.');
+    } catch {
+      setToast('Check-in not sent. Reconnect to your relay and try again.');
+    }
+  };
 
-  const content = useMemo(() => {
-    if (activeTab === 'map') return <MapScreen currentCoordinate={currentCoordinate} locationEnabled={locationEnabled} circleName={circle?.circleName ?? 'Northstar Circle'} circleMembers={mapMembers} onRequestLocation={requestLocation} onCheckIn={() => setCheckInVisible(true)} onRecenter={() => setToast('Map centered on your location.')} onOpenMember={setSelectedMember} />;
-    if (activeTab === 'circle') return <CircleScreen circleMembers={mapMembers} circleName={circle?.circleName ?? 'Northstar Circle'} onInvite={invite} onOpenMember={setSelectedMember} />;
-    if (activeTab === 'activity') return <ActivityScreen onCheckIn={() => setCheckInVisible(true)} />;
-    return <YouScreen locationEnabled={locationEnabled} backgroundReady={backgroundReady} onToggleLocation={toggleLocation} onBackgroundLocation={() => setToast('Background location is wired for the development-build step.')} circle={circle} onRelaySetup={() => circle ? setToast('Your self-hosted relay is connected.') : router.push('/relay')} onInvite={invite} onJoin={() => router.push('/join')} />;
-  }, [activeTab, backgroundReady, circle, currentCoordinate, locationEnabled, mapMembers, router]);
+  const content = (() => {
+    if (activeTab === 'map') return <MapScreen currentCoordinate={currentCoordinate} locationEnabled={locationEnabled} circleName={circle?.circleName ?? ''} circleMembers={mapMembers} relayConnected={relayConnected} onRequestLocation={requestLocation} onCheckIn={() => setCheckInVisible(true)} onRecenter={() => setToast('Map centered on your location.')} onOpenMember={setSelectedMember} />;
+    if (activeTab === 'circle') return <CircleScreen circleMembers={mapMembers} circleName={circle?.circleName ?? 'No circle yet'} onInvite={invite} onOpenMember={setSelectedMember} />;
+    if (activeTab === 'activity') return <ActivityScreen circle={circle} checkIns={checkIns} onCheckIn={() => setCheckInVisible(true)} />;
+    return <YouScreen locationEnabled={locationEnabled} locationReady={locationReady} backgroundReady={backgroundReady} relayConnected={relayConnected} onToggleLocation={toggleLocation} onBackgroundLocation={() => setToast(backgroundReady ? 'Background location is registered on this device.' : 'Background location needs permission and a development build.')} circle={circle} onRelaySetup={() => circle ? setToast(relayConnected ? 'Your self-hosted relay is connected.' : 'Your self-hosted relay is offline.') : router.push('/relay')} onInvite={invite} onJoin={() => router.push('/join')} />;
+  })();
 
-  return <SafeAreaView style={styles.appRoot}><StatusBar style="dark" /><Header circleName={circle?.circleName ?? 'Northstar Circle'} onSettings={() => router.replace('/you')} /><View style={styles.mainContent}>{content}</View><BottomTabs activeTab={activeTab} onTabChange={(tab) => router.replace(`/${tab}`)} />{Boolean(toast) && <View style={styles.toast}><Icon name="information-circle" size={18} color={COLORS.white} /><Text style={styles.toastText}>{toast}</Text></View>}<CheckInModal visible={checkInVisible} onClose={() => setCheckInVisible(false)} onConfirm={checkIn} /><MemberModal member={selectedMember} onClose={() => setSelectedMember(null)} /></SafeAreaView>;
+  return <SafeAreaView style={styles.appRoot}><StatusBar style="dark" /><Header circleName={circle?.circleName ?? 'No circle'} onSettings={() => router.replace('/you')} /><View style={styles.mainContent}>{content}</View><BottomTabs activeTab={activeTab} onTabChange={(tab) => router.replace(`/${tab}`)} />{Boolean(toast) && <View style={styles.toast}><Icon name="information-circle" size={18} color={COLORS.white} /><Text style={styles.toastText}>{toast}</Text></View>}<CheckInModal visible={checkInVisible} onClose={() => setCheckInVisible(false)} onConfirm={checkIn} /><MemberModal member={selectedMember} onClose={() => setSelectedMember(null)} /></SafeAreaView>;
 }
 
 const styles = StyleSheet.create({
   appRoot: { flex: 1, backgroundColor: COLORS.canvas },
+  emptyNote: { color: COLORS.muted, fontSize: 12, lineHeight: 18, marginBottom: 18 },
   mainContent: { flex: 1 },
   header: { height: 76, backgroundColor: COLORS.white, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: COLORS.border },
   brandMark: { width: 36, height: 36, borderRadius: 12, backgroundColor: COLORS.coral, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-8deg' }] },
@@ -488,6 +465,7 @@ const styles = StyleSheet.create({
   mapControls: { position: 'absolute', right: 16, top: 18, gap: 9 },
   mapControlButton: { width: 42, height: 42, borderRadius: 13, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', shadowColor: '#16233B', shadowOpacity: 0.13, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
   mapMarker: { width: 45, height: 45, borderRadius: 23, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', borderWidth: 4, shadowColor: '#16233B', shadowOpacity: 0.2, shadowRadius: 5, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
+  mapMarkerStale: { opacity: 0.45 },
   mapMarkerText: { fontSize: 12, fontWeight: '900' },
   mapAttribution: { position: 'absolute', bottom: 173, left: 8, backgroundColor: 'rgba(255,255,255,0.78)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 3 },
   attributionText: { color: '#43506A', fontSize: 8 },

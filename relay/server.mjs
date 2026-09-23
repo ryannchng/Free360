@@ -10,6 +10,7 @@ const STATE_PATH = process.env.RELAY_DATA_PATH ?? '/data/relay-state.json';
 const MAX_PAYLOAD_BYTES = 32 * 1024;
 const MAX_DEVICES_PER_CIRCLE = 20;
 const MAX_INVITE_TTL_SECONDS = 24 * 60 * 60;
+const MAX_ACTIVITY_EVENTS = 100;
 
 /**
  * The relay deliberately stores only opaque E2EE envelopes. It never receives
@@ -72,7 +73,10 @@ function persistState() {
       await writeFile(temporaryPath, snapshot, { mode: 0o600 });
       await rename(temporaryPath, STATE_PATH);
     })
-    .catch((error) => console.error('[relay] Could not persist state:', error.message));
+    .catch((error) => {
+      console.error('[relay] Could not persist state:', error.message);
+      throw error;
+    });
   return persistence;
 }
 
@@ -138,6 +142,7 @@ async function createCircle(socket, message) {
     },
     invites: {},
     snapshots: {},
+    events: [],
   };
   connections.set(socket, { circleId, deviceId, isOwner: true });
   await persistState();
@@ -158,6 +163,7 @@ async function authenticate(socket, message) {
     circleId,
     isOwner: circle.ownerDeviceId === deviceId,
     snapshots: Object.entries(circle.snapshots).map(([senderDeviceId, snapshot]) => ({ senderDeviceId, ...snapshot })),
+    events: circle.events ?? [],
   });
 }
 
@@ -208,15 +214,20 @@ async function claimInvite(socket, message) {
     circleId,
     deviceToken,
     snapshots: Object.entries(circle.snapshots).map(([senderDeviceId, snapshot]) => ({ senderDeviceId, ...snapshot })),
+    events: circle.events ?? [],
   });
   broadcast(circleId, { type: 'member_joined', senderDeviceId: deviceId, at: now() }, socket);
+}
+
+function validEnvelope(envelope) {
+  return isPlainObject(envelope) && envelope.version === 1 && typeof envelope.nonce === 'string' && typeof envelope.ciphertext === 'string' && envelope.nonce.length <= 100 && envelope.ciphertext.length <= MAX_PAYLOAD_BYTES;
 }
 
 async function publish(socket, message) {
   const session = assertAuthenticated(socket, message);
   if (!session) return;
   const { requestId, envelope } = message;
-  if (!isPlainObject(envelope) || envelope.version !== 1 || typeof envelope.nonce !== 'string' || typeof envelope.ciphertext !== 'string' || envelope.nonce.length > 100 || envelope.ciphertext.length > MAX_PAYLOAD_BYTES) {
+  if (!validEnvelope(envelope)) {
     fail(socket, requestId, 'invalid_envelope', 'The relay accepts only a small opaque encrypted envelope.');
     return;
   }
@@ -227,6 +238,23 @@ async function publish(socket, message) {
   await persistState();
   broadcast(session.circleId, { type: 'event', senderDeviceId: session.deviceId, ...snapshot }, socket);
   reply(socket, requestId, 'published', { receivedAt: snapshot.receivedAt });
+}
+
+async function publishEvent(socket, message) {
+  const session = assertAuthenticated(socket, message);
+  if (!session) return;
+  if (!validEnvelope(message.envelope)) {
+    fail(socket, message.requestId, 'invalid_envelope', 'The relay accepts only a small opaque encrypted envelope.');
+    return;
+  }
+  const circle = getCircle(session.circleId);
+  const event = { senderDeviceId: session.deviceId, envelope: message.envelope, receivedAt: now() };
+  circle.events ??= [];
+  circle.events.push(event);
+  if (circle.events.length > MAX_ACTIVITY_EVENTS) circle.events.splice(0, circle.events.length - MAX_ACTIVITY_EVENTS);
+  await persistState();
+  broadcast(session.circleId, { type: 'activity_event', ...event }, socket);
+  reply(socket, message.requestId, 'event_published', { receivedAt: event.receivedAt });
 }
 
 async function removeDevice(socket, message) {
@@ -240,6 +268,7 @@ async function removeDevice(socket, message) {
   }
   delete circle.devices[deviceId];
   delete circle.snapshots[deviceId];
+  circle.events = (circle.events ?? []).filter((event) => event.senderDeviceId !== deviceId);
   await persistState();
   for (const [peer, peerSession] of connections.entries()) {
     if (peerSession.circleId === session.circleId && peerSession.deviceId === deviceId) {
@@ -274,6 +303,7 @@ async function handleMessage(socket, raw) {
     case 'create_invite': return createInvite(socket, message);
     case 'claim_invite': return claimInvite(socket, message);
     case 'publish': return publish(socket, message);
+    case 'publish_event': return publishEvent(socket, message);
     case 'remove_device': return removeDevice(socket, message);
     case 'ping': return reply(socket, message.requestId, 'pong', { at: now() });
     default: return fail(socket, message.requestId, 'unknown_message', 'This relay does not recognize that message type.');
@@ -312,7 +342,12 @@ websocket.on('connection', (socket) => {
       socket.close(1003, 'Text messages only');
       return;
     }
-    void handleMessage(socket, raw);
+    void handleMessage(socket, raw).catch((error) => {
+      console.error('[relay] Request failed:', error);
+      let requestId;
+      try { requestId = JSON.parse(raw.toString()).requestId; } catch { /* malformed input */ }
+      fail(socket, requestId, 'relay_error', 'The relay could not complete this request.');
+    });
   });
   socket.on('close', () => connections.delete(socket));
   socket.on('error', () => connections.delete(socket));
