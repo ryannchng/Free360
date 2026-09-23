@@ -9,7 +9,7 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="[tab]" />
-        <Stack.Screen name="relay" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="create-circle" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="invite" options={{ animation: 'slide_from_right' }} />
         <Stack.Screen name="join" options={{ animation: 'slide_from_bottom' }} />
       </Stack>

@@ -4,6 +4,7 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
+    "@supabase/supabase-js": "^2.117.1",
     "base64-js": "^1.5.1",
     "expo": "~57.0.24",
     "expo-camera": "~57.0.5",
@@ -14,6 +15,7 @@
     "expo-location": "~57.0.19",
     "expo-router": "~57.0.22",
     "expo-secure-store": "~57.0.4",
+    "expo-sqlite": "~57.0.3",
     "expo-status-bar": "~57.0.1",
     "expo-task-manager": "~57.0.19",
     "react": "19.2.3",
@@ -24,6 +26,7 @@
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "react-native-svg": "15.15.4",
+    "react-native-url-polyfill": "^4.0.0",
     "react-native-web": "^0.21.2",
     "tweetnacl": "^1.0.3"
   },

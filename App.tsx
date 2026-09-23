@@ -108,7 +108,7 @@ function Header({ circleName, onSettings }: { circleName: string; onSettings: ()
   );
 }
 
-function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembers, relayConnected, onRequestLocation, onCheckIn, onRecenter, onOpenMember }: { currentCoordinate: { latitude: number; longitude: number }; locationEnabled: boolean; circleName: string; circleMembers: Member[]; relayConnected: boolean; onRequestLocation: () => void; onCheckIn: () => void; onRecenter: () => void; onOpenMember: (member: Member) => void }) {
+function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembers, circleConnected, onRequestLocation, onCheckIn, onRecenter, onOpenMember }: { currentCoordinate: { latitude: number; longitude: number }; locationEnabled: boolean; circleName: string; circleMembers: Member[]; circleConnected: boolean; onRequestLocation: () => void; onCheckIn: () => void; onRecenter: () => void; onOpenMember: (member: Member) => void }) {
   const mapRef = useRef<MapView>(null);
 
   useEffect(() => {
@@ -131,7 +131,7 @@ function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembe
       </MapView>
 
       <View style={styles.mapTopOverlay}>
-        <View style={styles.safePill}><View style={styles.safeIcon}><Icon name={relayConnected ? 'cloud-done-outline' : 'cloud-offline-outline'} size={15} color={relayConnected ? COLORS.mint : COLORS.yellow} /></View><View><Text style={styles.safePillLabel}>{!circleName ? 'NO CIRCLE YET' : relayConnected ? 'RELAY CONNECTED' : 'RELAY OFFLINE'}</Text><Text style={styles.safePillValue}>{!circleName ? 'Set up a relay to begin' : circleMembers.some((member) => member.isStale) ? 'Some locations are stale' : relayConnected ? 'Locations are not safety alerts' : 'Updates may be delayed'}</Text></View></View>
+        <View style={styles.safePill}><View style={styles.safeIcon}><Icon name={circleConnected ? 'cloud-done-outline' : 'cloud-offline-outline'} size={15} color={circleConnected ? COLORS.mint : COLORS.yellow} /></View><View><Text style={styles.safePillLabel}>{!circleName ? 'NO CIRCLE YET' : circleConnected ? 'CIRCLE CONNECTED' : 'CIRCLE OFFLINE'}</Text><Text style={styles.safePillValue}>{!circleName ? 'Create or join a circle to begin' : circleMembers.some((member) => member.isStale) ? 'Some locations are stale' : circleConnected ? 'Locations are not safety alerts' : 'Updates may be delayed'}</Text></View></View>
         {!locationEnabled && <Pressable style={styles.locationPrompt} onPress={onRequestLocation}><Icon name="location-outline" size={17} color={COLORS.coral} /><Text style={styles.locationPromptText}>Turn on location sharing</Text><Icon name="arrow-forward" size={16} color={COLORS.coral} /></Pressable>}
       </View>
 
@@ -165,7 +165,7 @@ function ActivityScreen({ onCheckIn, checkIns, circle }: { onCheckIn: () => void
   return (
     <ScrollView style={styles.contentScreen} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
       <SectionTitle eyebrow="ENCRYPTED UPDATES" title="Circle activity" />
-      <Text style={styles.emptyNote}>Check-ins sent through your relay appear here. This is not an emergency monitoring service.</Text>
+      <Text style={styles.emptyNote}>Encrypted check-ins appear here. This is not an emergency monitoring service.</Text>
       <Text style={styles.timelineLabel}>RECENT CHECK-INS</Text>
       {checkIns.length ? <View style={styles.timeline}>{checkIns.map(({ deviceId, payload }, index) => <ActivityItem key={payload.id} icon="checkmark-circle" tone="mint" time={new Date(payload.recordedAt).toLocaleString()} title={deviceId === circle?.deviceId ? 'You checked in' : `Member ${deviceId.slice(0, 6)} checked in`} body={payload.message || 'No note'} isLast={index === checkIns.length - 1} />)}</View> : <Text style={styles.emptyNote}>No check-ins yet.</Text>}
       <Pressable style={styles.fullWidthAction} onPress={onCheckIn}><Icon name="checkmark-circle-outline" size={19} color={COLORS.coral} /><Text style={styles.fullWidthActionText}>Send a check-in to your circle</Text><Icon name="arrow-forward" size={17} color={COLORS.coral} /></Pressable>
@@ -179,11 +179,11 @@ function ActivityItem({ icon, tone, time, title, body, isLast = false }: { icon:
   return <View style={styles.timelineItem}><View style={styles.timelineRail}><View style={[styles.timelineIcon, { backgroundColor: tone === 'blue' ? COLORS.blueSoft : tone === 'coral' ? COLORS.coralSoft : tone === 'mint' ? COLORS.mintSoft : COLORS.yellowSoft }]}><Icon name={iconName} size={17} color={palette} /></View>{!isLast && <View style={styles.timelineLine} />}</View><View style={styles.timelineCopy}><Text style={styles.timelineTime}>{time}</Text><Text style={styles.timelineTitle}>{title}</Text><Text style={styles.timelineBody}>{body}</Text></View></View>;
 }
 
-function YouScreen({ locationEnabled, locationReady, backgroundReady, relayConnected, onToggleLocation, onBackgroundLocation, circle, onRelaySetup, onInvite, onJoin }: { locationEnabled: boolean; locationReady: boolean; backgroundReady: boolean; relayConnected: boolean; onToggleLocation: () => void; onBackgroundLocation: () => void; circle: CircleConfig | null; onRelaySetup: () => void; onInvite: () => void; onJoin: () => void }) {
+function YouScreen({ locationEnabled, locationReady, backgroundReady, circleConnected, onToggleLocation, onBackgroundLocation, circle, onCircleSetup, onInvite, onJoin }: { locationEnabled: boolean; locationReady: boolean; backgroundReady: boolean; circleConnected: boolean; onToggleLocation: () => void; onBackgroundLocation: () => void; circle: CircleConfig | null; onCircleSetup: () => void; onInvite: () => void; onJoin: () => void }) {
   return (
     <ScrollView style={styles.contentScreen} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
       <SectionTitle eyebrow="YOUR DEVICE" title="You" />
-      <View style={styles.profileCard}><Avatar member={selfMember} size={68} /><View style={styles.profileCopy}><Text style={styles.profileName}>This device</Text><Text style={styles.profileEmail}>No account required</Text><View style={styles.profileStatus}><View style={styles.profileStatusDot} /><Text style={styles.profileStatusText}>{circle ? locationEnabled ? 'Sharing with your circle' : 'Location sharing paused' : 'No circle configured'}</Text></View></View></View>
+      <View style={styles.profileCard}><Avatar member={selfMember} size={68} /><View style={styles.profileCopy}><Text style={styles.profileName}>This device</Text><Text style={styles.profileEmail}>No email or password required</Text><View style={styles.profileStatus}><View style={styles.profileStatusDot} /><Text style={styles.profileStatusText}>{circle ? locationEnabled ? 'Sharing with your circle' : 'Location sharing paused' : 'No circle configured'}</Text></View></View></View>
       <SectionTitle eyebrow="LOCATION" title="Sharing controls" />
       <View style={styles.settingsCard}>
         <View style={styles.settingRow}><View style={[styles.settingIcon, { backgroundColor: COLORS.coralSoft }]}><Icon name="location" size={19} color={COLORS.coral} /></View><View style={styles.settingCopy}><Text style={styles.settingTitle}>Location sharing</Text><Text style={styles.settingDescription}>{!locationReady ? 'Checking device sharing state…' : locationEnabled ? 'Location updates enabled on this device' : 'Location sharing is paused'}</Text></View><Switch value={locationEnabled} disabled={!locationReady} onValueChange={onToggleLocation} trackColor={{ false: '#D6DCE5', true: '#FFB8B1' }} thumbColor={locationEnabled ? COLORS.coral : '#FFFFFF'} /></View>
@@ -191,13 +191,13 @@ function YouScreen({ locationEnabled, locationReady, backgroundReady, relayConne
         <Pressable style={styles.settingRow} onPress={onBackgroundLocation}><View style={[styles.settingIcon, { backgroundColor: COLORS.blueSoft }]}><Icon name="navigate" size={19} color={COLORS.blue} /></View><View style={styles.settingCopy}><Text style={styles.settingTitle}>Background updates</Text><Text style={styles.settingDescription}>{backgroundReady ? 'Registered on this device' : 'Not active · development build required'}</Text></View><View style={[styles.statusCheck, { backgroundColor: backgroundReady ? COLORS.mintSoft : COLORS.yellowSoft }]}><Icon name={backgroundReady ? 'checkmark' : 'information'} size={15} color={backgroundReady ? COLORS.mint : '#C88313'} /></View></Pressable>
       </View>
       <View style={styles.privacyNote}><Icon name="lock-closed-outline" size={17} color={COLORS.muted} /><Text style={styles.privacyText}>Your location is shared only with members of your circle. You can pause sharing any time.</Text></View>
-      <SectionTitle eyebrow="SELF-HOSTED" title="Private relay" action={circle?.isOwner ? 'Invite' : undefined} onAction={onInvite} />
+      <SectionTitle eyebrow="YOUR GROUP" title="Private circle" action={circle?.isOwner ? 'Invite' : undefined} onAction={onInvite} />
       <View style={styles.settingsCard}>
-        <Pressable style={styles.settingRow} onPress={onRelaySetup}>
+        <Pressable style={styles.settingRow} onPress={onCircleSetup}>
           <View style={[styles.settingIcon, { backgroundColor: circle ? COLORS.mintSoft : COLORS.coralSoft }]}><Icon name={circle ? 'shield-checkmark-outline' : 'server-outline'} size={19} color={circle ? COLORS.mint : COLORS.coral} /></View>
-          <View style={styles.settingCopy}><Text style={styles.settingTitle}>{circle ? circle.circleName : 'Set up a private relay'}</Text><Text style={styles.settingDescription}>{circle ? `${circle.isOwner ? 'Circle owner' : 'Circle member'} · relay ${relayConnected ? 'connected' : 'offline'}` : 'Host your own relay—no account or shared database'}</Text></View><Icon name="chevron-forward" size={18} color={COLORS.subtle} />
+          <View style={styles.settingCopy}><Text style={styles.settingTitle}>{circle ? circle.circleName : 'Create a private circle'}</Text><Text style={styles.settingDescription}>{circle ? `${circle.isOwner ? 'Circle owner' : 'Circle member'} · ${circleConnected ? 'connected' : 'offline'}` : 'Connect through your group’s Supabase project'}</Text></View><Icon name="chevron-forward" size={18} color={COLORS.subtle} />
         </Pressable>
-        {!circle && <><View style={styles.settingsDivider} /><Pressable style={styles.settingRow} onPress={onJoin}><View style={[styles.settingIcon, { backgroundColor: COLORS.blueSoft }]}><Icon name="qr-code-outline" size={19} color={COLORS.blue} /></View><View style={styles.settingCopy}><Text style={styles.settingTitle}>Join with invitation QR</Text><Text style={styles.settingDescription}>No sign-up needed</Text></View><Icon name="chevron-forward" size={18} color={COLORS.subtle} /></Pressable></>}
+        {!circle && <><View style={styles.settingsDivider} /><Pressable style={styles.settingRow} onPress={onJoin}><View style={[styles.settingIcon, { backgroundColor: COLORS.blueSoft }]}><Icon name="qr-code-outline" size={19} color={COLORS.blue} /></View><View style={styles.settingCopy}><Text style={styles.settingTitle}>Join with invitation QR</Text><Text style={styles.settingDescription}>No email sign-up needed</Text></View><Icon name="chevron-forward" size={18} color={COLORS.subtle} /></Pressable></>}
       </View>
       <Text style={styles.emptyNote}>Notifications, saved places, and automatic safety alerts are not available in this MVP.</Text>
       <Text style={styles.versionText}>Free360 preview · v0.1.0</Text>
@@ -236,7 +236,7 @@ export default function App() {
   const [circle, setCircle] = useState<CircleConfig | null>(null);
   const [remoteSnapshots, setRemoteSnapshots] = useState<Record<string, CircleSnapshot>>({});
   const [checkIns, setCheckIns] = useState<{ deviceId: string; payload: CheckIn }[]>([]);
-  const [relayConnected, setRelayConnected] = useState(false);
+  const [circleConnected, setCircleConnected] = useState(false);
   const [now, setNow] = useState(0);
   const [checkInVisible, setCheckInVisible] = useState(false);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
@@ -285,7 +285,7 @@ export default function App() {
       if (circleRef.current?.circleId !== savedCircle?.circleId) {
         setRemoteSnapshots({});
         setCheckIns([]);
-        setRelayConnected(false);
+        setCircleConnected(false);
         setCircle(savedCircle);
       }
       circleRef.current = savedCircle;
@@ -297,7 +297,7 @@ export default function App() {
     const subscription = subscribeToCircle(circle, (update) => {
       if (update.kind === 'snapshot' && update.deviceId !== circle.deviceId) setRemoteSnapshots((current) => ({ ...current, [update.deviceId]: update.payload }));
       if (update.kind === 'checkin') setCheckIns((current) => current.some((item) => item.payload.id === update.payload.id) ? current : [{ deviceId: update.deviceId, payload: update.payload }, ...current].sort((a, b) => Date.parse(b.payload.recordedAt) - Date.parse(a.payload.recordedAt)).slice(0, 100));
-    }, setRelayConnected);
+    }, setCircleConnected);
     return () => subscription.close();
   }, [circle]);
 
@@ -308,7 +308,7 @@ export default function App() {
       id: deviceId,
       name: `Member ${deviceId.slice(0, 6)}`,
       initials: `M${index + 1}`,
-      role: 'Private relay member',
+      role: 'Circle member',
       status: snapshot.type === 'paused' ? 'Sharing paused' : now - Date.parse(snapshot.recordedAt) > STALE_AFTER_MS ? 'Location stale' : 'Location shared',
       lastSeen: ageLabel(snapshot.recordedAt, now),
       coordinate: snapshot.type === 'location' ? { latitude: snapshot.latitude, longitude: snapshot.longitude } : INITIAL_REGION,
@@ -331,7 +331,7 @@ export default function App() {
   };
 
   const requestLocation = async () => {
-    if (!circleRef.current) { router.push('/relay'); return; }
+    if (!circleRef.current) { router.push('/create-circle'); return; }
     if (Platform.OS === 'web') {
       setToast('Location preview is available on a physical device.');
       return;
@@ -394,7 +394,7 @@ export default function App() {
         await publishPaused(circleRef.current);
         setToast('Location sharing is paused.');
       } catch {
-        setToast('Sharing stopped on this device. Paused status will sync when the relay reconnects.');
+        setToast('Sharing stopped on this device. Paused status will sync when the connection returns.');
       }
     }
   };
@@ -402,7 +402,7 @@ export default function App() {
   const toggleLocation = () => { if (locationEnabled) void stopLocation(); else void requestLocation(); };
   const invite = () => {
     if (!circle) {
-      router.push('/relay');
+      router.push('/create-circle');
       return;
     }
     if (!circle.isOwner) {
@@ -412,22 +412,22 @@ export default function App() {
     router.push('/invite');
   };
   const checkIn = async (message: string) => {
-    if (!circle) { setCheckInVisible(false); router.push('/relay'); return; }
+    if (!circle) { setCheckInVisible(false); router.push('/create-circle'); return; }
     try {
       const payload = await publishCheckIn(circle, message);
       setCheckIns((current) => [{ deviceId: circle.deviceId, payload }, ...current].slice(0, 100));
       setCheckInVisible(false);
       setToast('Check-in sent to your circle.');
     } catch {
-      setToast('Check-in not sent. Reconnect to your relay and try again.');
+      setToast('Check-in not sent. Reconnect to your group project and try again.');
     }
   };
 
   const content = (() => {
-    if (activeTab === 'map') return <MapScreen currentCoordinate={currentCoordinate} locationEnabled={locationEnabled} circleName={circle?.circleName ?? ''} circleMembers={mapMembers} relayConnected={relayConnected} onRequestLocation={requestLocation} onCheckIn={() => setCheckInVisible(true)} onRecenter={() => setToast('Map centered on your location.')} onOpenMember={setSelectedMember} />;
+    if (activeTab === 'map') return <MapScreen currentCoordinate={currentCoordinate} locationEnabled={locationEnabled} circleName={circle?.circleName ?? ''} circleMembers={mapMembers} circleConnected={circleConnected} onRequestLocation={requestLocation} onCheckIn={() => setCheckInVisible(true)} onRecenter={() => setToast('Map centered on your location.')} onOpenMember={setSelectedMember} />;
     if (activeTab === 'circle') return <CircleScreen circleMembers={mapMembers} circleName={circle?.circleName ?? 'No circle yet'} onInvite={invite} onOpenMember={setSelectedMember} />;
     if (activeTab === 'activity') return <ActivityScreen circle={circle} checkIns={checkIns} onCheckIn={() => setCheckInVisible(true)} />;
-    return <YouScreen locationEnabled={locationEnabled} locationReady={locationReady} backgroundReady={backgroundReady} relayConnected={relayConnected} onToggleLocation={toggleLocation} onBackgroundLocation={() => setToast(backgroundReady ? 'Background location is registered on this device.' : 'Background location needs permission and a development build.')} circle={circle} onRelaySetup={() => circle ? setToast(relayConnected ? 'Your self-hosted relay is connected.' : 'Your self-hosted relay is offline.') : router.push('/relay')} onInvite={invite} onJoin={() => router.push('/join')} />;
+    return <YouScreen locationEnabled={locationEnabled} locationReady={locationReady} backgroundReady={backgroundReady} circleConnected={circleConnected} onToggleLocation={toggleLocation} onBackgroundLocation={() => setToast(backgroundReady ? 'Background location is registered on this device.' : 'Background location needs permission and a development build.')} circle={circle} onCircleSetup={() => circle ? setToast(circleConnected ? 'Your group project is connected.' : 'Your group project is offline.') : router.push('/create-circle')} onInvite={invite} onJoin={() => router.push('/join')} />;
   })();
 
   return <SafeAreaView style={styles.appRoot}><StatusBar style="dark" /><Header circleName={circle?.circleName ?? 'No circle'} onSettings={() => router.replace('/you')} /><View style={styles.mainContent}>{content}</View><BottomTabs activeTab={activeTab} onTabChange={(tab) => router.replace(`/${tab}`)} />{Boolean(toast) && <View style={styles.toast}><Icon name="information-circle" size={18} color={COLORS.white} /><Text style={styles.toastText}>{toast}</Text></View>}<CheckInModal visible={checkInVisible} onClose={() => setCheckInVisible(false)} onConfirm={checkIn} /><MemberModal member={selectedMember} onClose={() => setSelectedMember(null)} /></SafeAreaView>;
