@@ -2,7 +2,9 @@ import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import { fromByteArray, toByteArray } from 'base64-js';
 import nacl from 'tweetnacl';
-import { ensureDeviceSession, getProjectUrl, getSupabase } from './supabase';
+import { getBackendUrl, isSelfHosted } from './backend';
+import { claimSelfHostedInvite, createSelfHostedCircle, createSelfHostedInvite, ensureSelfHostedSession, isSelfHostedMember, publishSelfHostedEnvelope, subscribeSelfHosted } from './self-hosted';
+import { ensureDeviceSession, getSupabase } from './supabase';
 
 const CIRCLE_STORAGE_KEY = 'free360.circle.v2';
 const PENDING_SNAPSHOT_KEY = 'free360.pending-snapshot.v2';
@@ -83,7 +85,11 @@ function requireString(value: unknown, label: string) {
 }
 
 function requireProject(projectUrl: string) {
-  if (projectUrl !== getProjectUrl()) throw new Error('This invitation belongs to another Free360 Supabase project. Install the app build configured for that group.');
+  if (projectUrl !== getBackendUrl()) throw new Error('This invitation belongs to another Free360 group server. Install the app build configured for that group.');
+}
+
+function ensureBackendSession() {
+  return isSelfHosted() ? ensureSelfHostedSession() : ensureDeviceSession();
 }
 
 export function encryptCirclePayload(payload: CirclePayload, encryptionKey: string): EncryptedEnvelope {
@@ -136,15 +142,20 @@ export function decodeInvite(value: string): InvitePayload {
 }
 
 export async function createCircle(circleName: string, setupCode: string): Promise<CircleConfig> {
-  const deviceId = await ensureDeviceSession();
+  const deviceId = await ensureBackendSession();
   const circleId = randomId();
   const config: CircleConfig = {
-    version: 2, circleId, deviceId, encryptionKey: randomSecret(), projectUrl: getProjectUrl(),
+    version: 2, circleId, deviceId, encryptionKey: randomSecret(), projectUrl: getBackendUrl(),
     circleName: circleName.trim() || 'My Circle', isOwner: true,
   };
   await saveCircle({ ...config, pending: true });
-  const { error } = await getSupabase().rpc('free360_create_circle', { p_circle_id: circleId, p_setup_code: setupCode.trim() });
-  if (error) {
+  try {
+    if (isSelfHosted()) await createSelfHostedCircle(circleId, setupCode.trim());
+    else {
+      const { error } = await getSupabase().rpc('free360_create_circle', { p_circle_id: circleId, p_setup_code: setupCode.trim() });
+      if (error) throw error;
+    }
+  } catch (error) {
     if (await recoverPendingCircle(config)) return config;
     throw error;
   }
@@ -156,29 +167,41 @@ export async function createInvite(config: CircleConfig) {
   await ensureMatchingSession(config);
   const inviteId = randomId();
   const inviteSecret = fromByteArray(randomBytes(32));
-  const { data, error } = await getSupabase().rpc('free360_create_invite', { p_invite_id: inviteId, p_secret: inviteSecret });
-  if (error) throw error;
+  let expiresAt: string;
+  if (isSelfHosted()) expiresAt = await createSelfHostedInvite(inviteId, inviteSecret);
+  else {
+    const { data, error } = await getSupabase().rpc('free360_create_invite', { p_invite_id: inviteId, p_secret: inviteSecret });
+    if (error) throw error;
+    expiresAt = String(data);
+  }
   const payload: InvitePayload = {
     version: 2, projectUrl: config.projectUrl, circleId: config.circleId, inviteId, inviteSecret,
     encryptionKey: config.encryptionKey, circleName: config.circleName,
   };
-  return { qrValue: encodeInvite(payload), expiresAt: String(data) };
+  return { qrValue: encodeInvite(payload), expiresAt };
 }
 
 export async function joinCircle(qrValue: string): Promise<CircleConfig> {
   const invite = decodeInvite(qrValue);
-  const deviceId = await ensureDeviceSession();
+  const deviceId = await ensureBackendSession();
   const config: CircleConfig = {
     version: 2, circleId: invite.circleId, deviceId, encryptionKey: invite.encryptionKey,
     projectUrl: invite.projectUrl, circleName: invite.circleName, isOwner: false,
   };
   await saveCircle({ ...config, pending: true });
-  const { data, error } = await getSupabase().rpc('free360_claim_invite', { p_invite_id: invite.inviteId, p_secret: invite.inviteSecret, p_circle_id: invite.circleId });
-  if (error) {
+  let claimedCircleId: string;
+  try {
+    if (isSelfHosted()) claimedCircleId = await claimSelfHostedInvite(invite.inviteId, invite.inviteSecret, invite.circleId);
+    else {
+      const { data, error } = await getSupabase().rpc('free360_claim_invite', { p_invite_id: invite.inviteId, p_secret: invite.inviteSecret, p_circle_id: invite.circleId });
+      if (error) throw error;
+      claimedCircleId = data;
+    }
+  } catch (error) {
     if (await recoverPendingCircle(config)) return config;
     throw error;
   }
-  if (data !== invite.circleId) throw new Error('This invitation does not match the circle.');
+  if (claimedCircleId !== invite.circleId) throw new Error('This invitation does not match the circle.');
   await saveCircle(config);
   return config;
 }
@@ -186,8 +209,12 @@ export async function joinCircle(qrValue: string): Promise<CircleConfig> {
 async function recoverPendingCircle(config: CircleConfig) {
   try {
     await ensureMatchingSession(config);
-    const { data, error } = await getSupabase().rpc('free360_is_member', { p_circle_id: config.circleId });
-    if (error || data !== true) return false;
+    if (isSelfHosted()) {
+      if (!await isSelfHostedMember(config.circleId)) return false;
+    } else {
+      const { data, error } = await getSupabase().rpc('free360_is_member', { p_circle_id: config.circleId });
+      if (error || data !== true) return false;
+    }
     await saveCircle({ ...config, pending: false });
     return true;
   } catch {
@@ -197,7 +224,7 @@ async function recoverPendingCircle(config: CircleConfig) {
 
 async function ensureMatchingSession(config: CircleConfig) {
   requireProject(config.projectUrl);
-  const deviceId = await ensureDeviceSession();
+  const deviceId = await ensureBackendSession();
   if (deviceId !== config.deviceId) throw new Error('This device session changed. Restore its original app data or ask the circle owner for a new invitation.');
 }
 
@@ -212,8 +239,11 @@ function serializeSnapshot<T>(operation: () => Promise<T>): Promise<T> {
 
 async function sendEnvelope(config: CircleConfig, envelope: EncryptedEnvelope, type: 'snapshot' | 'event') {
   await ensureMatchingSession(config);
-  const { error } = await getSupabase().rpc(type === 'snapshot' ? 'free360_publish_snapshot' : 'free360_publish_event', { p_envelope: envelope });
-  if (error) throw error;
+  if (isSelfHosted()) await publishSelfHostedEnvelope(envelope, type);
+  else {
+    const { error } = await getSupabase().rpc(type === 'snapshot' ? 'free360_publish_snapshot' : 'free360_publish_event', { p_envelope: envelope });
+    if (error) throw error;
+  }
 }
 
 async function flushPendingSnapshotInner(config: CircleConfig) {
@@ -265,6 +295,11 @@ function receiveEncryptedUpdate(row: Record<string, unknown>, encryptionKey: str
 }
 
 export function subscribeToCircle(config: CircleConfig, onUpdate: (update: CircleUpdate) => void, onConnectionChange: (connected: boolean) => void): CircleSubscription {
+  if (isSelfHosted()) return subscribeSelfHosted(config, (rows) => {
+    for (const row of rows) receiveEncryptedUpdate(row, config.encryptionKey, onUpdate);
+  }, onConnectionChange, () => {
+    void flushPendingSnapshot(config).catch((error) => console.warn('[Free360] Queued snapshot waiting for server:', error));
+  });
   let closed = false;
   let channel: ReturnType<ReturnType<typeof getSupabase>['channel']> | null = null;
   const start = async () => {
