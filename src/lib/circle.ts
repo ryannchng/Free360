@@ -136,11 +136,13 @@ export function decodeInvite(value: string): InvitePayload {
 }
 
 export async function createCircle(circleName: string, setupCode: string): Promise<CircleConfig> {
+  const name = circleName.trim();
+  if (!name) throw new Error('Enter a circle name.');
   const deviceId = await ensureDeviceSession();
   const circleId = randomId();
   const config: CircleConfig = {
     version: 2, circleId, deviceId, encryptionKey: randomSecret(), projectUrl: getProjectUrl(),
-    circleName: circleName.trim() || 'My Circle', isOwner: true,
+    circleName: name, isOwner: true,
   };
   await saveCircle({ ...config, pending: true });
   const { error } = await getSupabase().rpc('free360_create_circle', { p_circle_id: circleId, p_setup_code: setupCode.trim() });
