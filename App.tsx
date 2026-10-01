@@ -54,6 +54,9 @@ const COLORS = {
   blueSoft: '#EDF4FF',
   yellow: '#F5B33F',
   yellowSoft: '#FFF5DC',
+  purple: '#7944D5',
+  purpleSoft: '#F0E9FF',
+  deepPurple: '#28154D',
 };
 
 const INITIAL_REGION = {
@@ -108,7 +111,7 @@ function Header({ circleName, onSettings }: { circleName: string; onSettings: ()
   );
 }
 
-function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembers, circleConnected, onRequestLocation, onCheckIn, onRecenter, onOpenMember }: { currentCoordinate: { latitude: number; longitude: number }; locationEnabled: boolean; circleName: string; circleMembers: Member[]; circleConnected: boolean; onRequestLocation: () => void; onCheckIn: () => void; onRecenter: () => void; onOpenMember: (member: Member) => void }) {
+function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembers, circleConnected, onRequestLocation, onCheckIn, onRecenter, onOpenMember, onOpenCircle, onOpenSettings, onInvite, onCreateCircle, onJoinCircle, isOwner }: { currentCoordinate: { latitude: number; longitude: number }; locationEnabled: boolean; circleName: string; circleMembers: Member[]; circleConnected: boolean; onRequestLocation: () => void; onCheckIn: () => void; onRecenter: () => void; onOpenMember: (member: Member) => void; onOpenCircle: () => void; onOpenSettings: () => void; onInvite: () => void; onCreateCircle: () => void; onJoinCircle: () => void; isOwner: boolean }) {
   const mapRef = useRef<MapView>(null);
 
   useEffect(() => {
@@ -120,29 +123,43 @@ function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembe
     onRecenter();
   };
 
+  const actionLabel = !circleName ? 'Create circle' : isOwner ? 'Invite someone' : locationEnabled ? 'Your circle' : 'Share location';
+  const actionIcon: IconName = !circleName ? 'add' : isOwner ? 'person-add-outline' : locationEnabled ? 'people-outline' : 'location-outline';
+  const action = !circleName ? onCreateCircle : isOwner ? onInvite : locationEnabled ? onOpenCircle : onRequestLocation;
+
   return (
     <View style={styles.mapScreen}>
-      <MapView ref={mapRef} style={StyleSheet.absoluteFill} initialRegion={INITIAL_REGION} mapType={Platform.OS === 'android' ? 'none' : 'standard'} showsCompass={false} showsBuildings={false} showsPointsOfInterests={false} showsUserLocation={locationEnabled} toolbarEnabled={false}>
+      <MapView ref={mapRef} style={StyleSheet.absoluteFill} initialRegion={INITIAL_REGION} mapType={Platform.OS === 'android' ? 'none' : 'standard'} showsCompass={false} showsBuildings={false} showsPointsOfInterests={false} showsUserLocation={false} toolbarEnabled={false}>
         <UrlTile urlTemplate="https://tile.openstreetmap.org/{z}/{x}/{y}.png" maximumZ={19} flipY={false} />
         {circleMembers.filter((member) => !member.isPaused).map((member) => {
           const coordinate = member.isYou ? currentCoordinate : member.coordinate;
-          return <Marker key={member.id} coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} onPress={() => onOpenMember(member)} tracksViewChanges={false}><View style={[styles.mapMarker, member.isStale && styles.mapMarkerStale, { borderColor: member.color }]}><Text style={[styles.mapMarkerText, { color: member.color }]}>{member.initials}</Text></View></Marker>;
+          return <Marker key={`${member.id}:${member.isStale ? 'stale' : 'live'}`} coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} onPress={() => onOpenMember(member)} tracksViewChanges={false}><View style={[styles.mapMarker, member.isStale && styles.mapMarkerStale, { backgroundColor: member.color }]}><Text style={styles.mapMarkerText}>{member.initials}</Text></View></Marker>;
         })}
       </MapView>
 
-      <View style={styles.mapTopOverlay}>
-        <View style={styles.safePill}><View style={styles.safeIcon}><Icon name={circleConnected ? 'cloud-done-outline' : 'cloud-offline-outline'} size={15} color={circleConnected ? COLORS.mint : COLORS.yellow} /></View><View><Text style={styles.safePillLabel}>{!circleName ? 'NO CIRCLE YET' : circleConnected ? 'CIRCLE CONNECTED' : 'CIRCLE OFFLINE'}</Text><Text style={styles.safePillValue}>{!circleName ? 'Create or join a circle to begin' : circleMembers.some((member) => member.isStale) ? 'Some locations are stale' : circleConnected ? 'Locations are not safety alerts' : 'Updates may be delayed'}</Text></View></View>
-        {!locationEnabled && <Pressable style={styles.locationPrompt} onPress={onRequestLocation}><Icon name="location-outline" size={17} color={COLORS.coral} /><Text style={styles.locationPromptText}>Turn on location sharing</Text><Icon name="arrow-forward" size={16} color={COLORS.coral} /></Pressable>}
+      <View style={styles.mapTopBar}>
+        <Pressable style={styles.mapRoundButton} onPress={onOpenSettings} accessibilityLabel="Open settings"><Icon name="settings-outline" size={23} color={COLORS.purple} /></Pressable>
+        <Pressable style={styles.mapCirclePicker} onPress={onOpenCircle} accessibilityLabel="Open circle"><Text style={styles.mapCirclePickerText} numberOfLines={1}>{circleName || 'Your circle'}</Text><Icon name="chevron-down" size={18} color={COLORS.purple} /></Pressable>
+        <Pressable style={styles.mapRoundButton} onPress={isOwner || !circleName ? onInvite : onOpenCircle} accessibilityLabel={isOwner || !circleName ? 'Invite a member' : 'View circle'}><Icon name={isOwner || !circleName ? 'person-add-outline' : 'people-outline'} size={22} color={COLORS.purple} /></Pressable>
       </View>
 
-      <View style={styles.mapControls}><Pressable style={styles.mapControlButton} onPress={recenter} hitSlop={6}><Icon name="locate" size={21} color={COLORS.ink} /></Pressable><Pressable style={styles.mapControlButton} onPress={() => Alert.alert('Map style', 'OpenStreetMap tiles are active for this preview.')} hitSlop={6}><Icon name="layers-outline" size={21} color={COLORS.ink} /></Pressable></View>
-      <View style={styles.mapAttribution}><Text style={styles.attributionText}>© OpenStreetMap contributors</Text></View>
+      <View style={styles.mapTopOverlay}>
+        <View style={styles.safePill}><View style={[styles.safeIcon, { backgroundColor: circleConnected ? COLORS.purpleSoft : COLORS.yellowSoft }]}><Icon name={circleConnected ? 'cloud-done-outline' : 'cloud-offline-outline'} size={16} color={circleConnected ? COLORS.purple : COLORS.yellow} /></View><View><Text style={styles.safePillLabel}>{!circleName ? 'NO CIRCLE YET' : circleConnected ? 'CIRCLE CONNECTED' : 'CIRCLE OFFLINE'}</Text><Text style={styles.safePillValue}>{!circleName ? 'Create or join a circle to begin' : circleMembers.some((member) => member.isStale) ? 'Some locations are stale' : circleConnected ? 'Locations are not safety alerts' : 'Updates may be delayed'}</Text></View></View>
+        {!locationEnabled && <Pressable style={styles.locationPrompt} onPress={onRequestLocation}><Icon name="location-outline" size={17} color={COLORS.purple} /><Text style={styles.locationPromptText}>Turn on location sharing</Text><Icon name="arrow-forward" size={16} color={COLORS.purple} /></Pressable>}
+      </View>
+
+      <View style={styles.mapControls}><Pressable style={styles.mapControlButton} onPress={recenter} accessibilityLabel="Center map on your location" hitSlop={6}><Icon name="locate" size={24} color={COLORS.purple} /></Pressable></View>
+      <View style={styles.mapAttribution}><Text style={styles.attributionText}>{'\u00A9 OpenStreetMap contributors'}</Text></View>
+
+      <View style={styles.mapActions}>
+        <Pressable style={styles.mapActionButton} onPress={circleName ? onCheckIn : onJoinCircle}><Icon name={circleName ? 'checkmark-circle' : 'qr-code-outline'} size={21} color={COLORS.purple} /><Text style={styles.mapActionText}>{circleName ? 'Check in' : 'Join with QR'}</Text></Pressable>
+        <Pressable style={styles.mapActionButton} onPress={action}><Icon name={actionIcon} size={20} color={COLORS.purple} /><Text style={styles.mapActionText}>{actionLabel}</Text></Pressable>
+      </View>
 
       <View style={styles.mapBottomCard}>
         <View style={styles.cardHandle} />
-        <View style={styles.mapBottomHeader}><View><Text style={styles.mapBottomEyebrow}>{(circleName || 'PRIVATE CIRCLE').toUpperCase()}</Text><Text style={styles.mapBottomTitle}>{circleMembers.length} known member{circleMembers.length === 1 ? '' : 's'}</Text></View><View style={styles.connectedAvatars}>{circleMembers.slice(1, 4).map((member, index) => <Avatar key={member.id} member={member} size={34 - index * 2} />)}{circleMembers.length > 4 && <View style={styles.moreAvatar}><Text style={styles.moreAvatarText}>+{circleMembers.length - 4}</Text></View>}</View></View>
-        <View style={styles.mapBottomDivider} />
-        <View style={styles.quickActions}><Pressable style={styles.checkInButton} onPress={onCheckIn}><Icon name="checkmark-circle" size={19} color={COLORS.white} /><Text style={styles.checkInButtonText}>Check in</Text></Pressable><Pressable style={styles.shareButton} onPress={onRequestLocation}><Icon name="location-outline" size={19} color={COLORS.ink} /><Text style={styles.shareButtonText}>Enable location</Text></Pressable></View>
+        <View style={styles.mapBottomHeader}><View style={styles.mapBottomHeaderCopy}><Text style={styles.mapBottomTitle}>{circleName || 'Your circle'}</Text><Text style={styles.mapBottomSubtitle}>{circleName ? `${circleMembers.length} ${circleMembers.length === 1 ? 'member' : 'members'} \u00B7 ${circleConnected ? 'Connected' : 'Offline'}` : 'Your people will appear here'}</Text></View><Pressable style={styles.mapPanelArrow} onPress={onOpenCircle} accessibilityLabel="View circle"><Icon name="arrow-forward" size={19} color={COLORS.purple} /></Pressable></View>
+        {circleName ? <ScrollView style={styles.mapMemberScroll} showsVerticalScrollIndicator={false} nestedScrollEnabled><View style={styles.mapMemberList}>{circleMembers.map((member) => <Pressable key={member.id} style={styles.mapMemberRow} onPress={() => onOpenMember(member)}><Avatar member={member} size={48} /><View style={styles.mapMemberCopy}><Text style={styles.mapMemberName} numberOfLines={1}>{member.name}</Text><Text style={styles.mapMemberStatus} numberOfLines={1}>{member.status} {'\u00B7'} {member.lastSeen}</Text></View><Icon name="chevron-forward" size={17} color={COLORS.subtle} /></Pressable>)}</View></ScrollView> : <Pressable style={styles.mapEmptyCard} onPress={onCreateCircle}><Icon name="people-outline" size={23} color={COLORS.purple} /><View style={styles.mapEmptyCopy}><Text style={styles.mapEmptyTitle}>Start a private circle</Text><Text style={styles.mapEmptyText}>Create one to see members on the map.</Text></View><Icon name="arrow-forward" size={18} color={COLORS.purple} /></Pressable>}
       </View>
     </View>
   );
@@ -206,8 +223,8 @@ function YouScreen({ locationEnabled, locationReady, backgroundReady, circleConn
 }
 
 function BottomTabs({ activeTab, onTabChange }: { activeTab: Tab; onTabChange: (tab: Tab) => void }) {
-  const tabs: { key: Tab; label: string; icon: IconName; activeIcon: IconName }[] = [{ key: 'map', label: 'Map', icon: 'map-outline', activeIcon: 'map' }, { key: 'circle', label: 'Circle', icon: 'people-outline', activeIcon: 'people' }, { key: 'activity', label: 'Activity', icon: 'pulse-outline', activeIcon: 'pulse' }, { key: 'you', label: 'You', icon: 'person-outline', activeIcon: 'person' }];
-  return <View style={styles.bottomTabs}>{tabs.map((tab) => { const isActive = tab.key === activeTab; return <Pressable key={tab.key} style={styles.tabButton} onPress={() => onTabChange(tab.key)}><View style={[styles.tabIconWrap, isActive && styles.tabIconWrapActive]}><Icon name={isActive ? tab.activeIcon : tab.icon} size={21} color={isActive ? COLORS.coral : COLORS.muted} /></View><Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>{tab.label}</Text></Pressable>; })}</View>;
+  const tabs: { key: Tab; label: string; icon: IconName; activeIcon: IconName }[] = [{ key: 'map', label: 'Location', icon: 'location-outline', activeIcon: 'location' }, { key: 'circle', label: 'Circle', icon: 'people-outline', activeIcon: 'people' }, { key: 'activity', label: 'Activity', icon: 'pulse-outline', activeIcon: 'pulse' }, { key: 'you', label: 'You', icon: 'person-outline', activeIcon: 'person' }];
+  return <View style={styles.bottomTabs}>{tabs.map((tab) => { const isActive = tab.key === activeTab; return <Pressable key={tab.key} style={styles.tabButton} onPress={() => onTabChange(tab.key)}><View style={[styles.tabIconWrap, isActive && styles.tabIconWrapActive]}><Icon name={isActive ? tab.activeIcon : tab.icon} size={22} color={isActive ? COLORS.purple : COLORS.muted} /></View><Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>{tab.label}</Text></Pressable>; })}</View>;
 }
 
 function CheckInModal({ visible, onClose, onConfirm }: { visible: boolean; onClose: () => void; onConfirm: (message: string) => void }) {
@@ -303,7 +320,7 @@ export default function App() {
 
   const mapMembers = useMemo(() => {
     if (!circle) return [];
-    const localMember = { ...selfMember, coordinate: currentCoordinate, role: circle.isOwner ? 'Circle owner' : 'Circle member', status: locationEnabled ? 'Location enabled' : 'Sharing paused', lastSeen: locationEnabled && hasCurrentLocation ? 'On this device' : 'No live location', isPaused: !locationEnabled || !hasCurrentLocation };
+    const localMember = { ...selfMember, color: COLORS.deepPurple, coordinate: currentCoordinate, role: circle.isOwner ? 'Circle owner' : 'Circle member', status: locationEnabled ? 'Location enabled' : 'Sharing paused', lastSeen: locationEnabled && hasCurrentLocation ? 'On this device' : 'No live location', isPaused: !locationEnabled || !hasCurrentLocation };
     const remoteMembers = Object.entries(remoteSnapshots).map(([deviceId, snapshot], index) => ({
       id: deviceId,
       name: `Member ${deviceId.slice(0, 6)}`,
@@ -312,7 +329,7 @@ export default function App() {
       status: snapshot.type === 'paused' ? 'Sharing paused' : now - Date.parse(snapshot.recordedAt) > STALE_AFTER_MS ? 'Location stale' : 'Location shared',
       lastSeen: ageLabel(snapshot.recordedAt, now),
       coordinate: snapshot.type === 'location' ? { latitude: snapshot.latitude, longitude: snapshot.longitude } : INITIAL_REGION,
-      color: ['#6B78E5', '#F19A5A', '#49A995', '#4386F4'][index % 4],
+      color: ['#075F58', '#3C9AB7', '#777F8C', '#5C3C90'][index % 4],
       battery: 0,
       isPaused: snapshot.type === 'paused',
       isStale: snapshot.type === 'location' && now - Date.parse(snapshot.recordedAt) > STALE_AFTER_MS,
@@ -424,13 +441,13 @@ export default function App() {
   };
 
   const content = (() => {
-    if (activeTab === 'map') return <MapScreen currentCoordinate={currentCoordinate} locationEnabled={locationEnabled} circleName={circle?.circleName ?? ''} circleMembers={mapMembers} circleConnected={circleConnected} onRequestLocation={requestLocation} onCheckIn={() => setCheckInVisible(true)} onRecenter={() => setToast('Map centered on your location.')} onOpenMember={setSelectedMember} />;
+    if (activeTab === 'map') return <MapScreen currentCoordinate={currentCoordinate} locationEnabled={locationEnabled} circleName={circle?.circleName ?? ''} circleMembers={mapMembers} circleConnected={circleConnected} isOwner={Boolean(circle?.isOwner)} onRequestLocation={requestLocation} onCheckIn={() => setCheckInVisible(true)} onRecenter={() => setToast('Map centered on your location.')} onOpenMember={setSelectedMember} onOpenCircle={() => router.replace('/circle')} onOpenSettings={() => router.replace('/you')} onInvite={invite} onCreateCircle={() => router.push('/create-circle')} onJoinCircle={() => router.push('/join')} />;
     if (activeTab === 'circle') return <CircleScreen circleMembers={mapMembers} circleName={circle?.circleName ?? 'No circle yet'} onInvite={invite} onOpenMember={setSelectedMember} />;
     if (activeTab === 'activity') return <ActivityScreen circle={circle} checkIns={checkIns} onCheckIn={() => setCheckInVisible(true)} />;
     return <YouScreen locationEnabled={locationEnabled} locationReady={locationReady} backgroundReady={backgroundReady} circleConnected={circleConnected} onToggleLocation={toggleLocation} onBackgroundLocation={() => setToast(backgroundReady ? 'Background location is registered on this device.' : 'Background location needs permission and a development build.')} circle={circle} onCircleSetup={() => circle ? setToast(circleConnected ? 'Your group project is connected.' : 'Your group project is offline.') : router.push('/create-circle')} onInvite={invite} onJoin={() => router.push('/join')} />;
   })();
 
-  return <SafeAreaView style={styles.appRoot}><StatusBar style="dark" /><Header circleName={circle?.circleName ?? 'No circle'} onSettings={() => router.replace('/you')} /><View style={styles.mainContent}>{content}</View><BottomTabs activeTab={activeTab} onTabChange={(tab) => router.replace(`/${tab}`)} />{Boolean(toast) && <View style={styles.toast}><Icon name="information-circle" size={18} color={COLORS.white} /><Text style={styles.toastText}>{toast}</Text></View>}<CheckInModal visible={checkInVisible} onClose={() => setCheckInVisible(false)} onConfirm={checkIn} /><MemberModal member={selectedMember} onClose={() => setSelectedMember(null)} /></SafeAreaView>;
+  return <SafeAreaView style={styles.appRoot}><StatusBar style="dark" />{activeTab !== 'map' && <Header circleName={circle?.circleName ?? 'No circle'} onSettings={() => router.replace('/you')} />}<View style={styles.mainContent}>{content}</View><BottomTabs activeTab={activeTab} onTabChange={(tab) => router.replace(`/${tab}`)} />{Boolean(toast) && <View style={styles.toast}><Icon name="information-circle" size={18} color={COLORS.white} /><Text style={styles.toastText}>{toast}</Text></View>}<CheckInModal visible={checkInVisible} onClose={() => setCheckInVisible(false)} onConfirm={checkIn} /><MemberModal member={selectedMember} onClose={() => setSelectedMember(null)} /></SafeAreaView>;
 }
 
 const styles = StyleSheet.create({
@@ -454,35 +471,45 @@ const styles = StyleSheet.create({
   avatar: { alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: COLORS.white, position: 'relative' },
   avatarText: { color: COLORS.white, fontWeight: '800', letterSpacing: -0.5 },
   onlineDot: { position: 'absolute', right: -1, bottom: 0, width: 12, height: 12, backgroundColor: COLORS.mint, borderRadius: 6, borderWidth: 2, borderColor: COLORS.white },
-  mapScreen: { flex: 1, overflow: 'hidden' },
-  mapTopOverlay: { position: 'absolute', top: 16, left: 16, right: 16, gap: 10 },
-  safePill: { alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.96)', borderRadius: 17, paddingVertical: 9, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', shadowColor: '#16233B', shadowOpacity: 0.13, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
-  safeIcon: { width: 28, height: 28, borderRadius: 9, backgroundColor: COLORS.mintSoft, alignItems: 'center', justifyContent: 'center', marginRight: 8 },
-  safePillLabel: { color: COLORS.ink, fontWeight: '800', fontSize: 10, letterSpacing: 0.9 },
+  mapScreen: { flex: 1, overflow: 'hidden', backgroundColor: '#E5F4EE' },
+  mapTopBar: { position: 'absolute', top: 12, left: 16, right: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  mapRoundButton: { width: 46, height: 46, borderRadius: 23, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', shadowColor: COLORS.deepPurple, shadowOpacity: 0.14, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 4 },
+  mapCirclePicker: { flex: 1, height: 48, borderRadius: 24, backgroundColor: COLORS.white, paddingHorizontal: 17, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, shadowColor: COLORS.deepPurple, shadowOpacity: 0.13, shadowRadius: 9, shadowOffset: { width: 0, height: 3 }, elevation: 4 },
+  mapCirclePickerText: { flex: 1, color: COLORS.deepPurple, fontSize: 17, fontWeight: '800' },
+  mapTopOverlay: { position: 'absolute', top: 73, left: 16, right: 70, gap: 8 },
+  safePill: { alignSelf: 'flex-start', maxWidth: '100%', backgroundColor: 'rgba(255,255,255,0.97)', borderRadius: 17, paddingVertical: 8, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', shadowColor: COLORS.deepPurple, shadowOpacity: 0.11, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
+  safeIcon: { width: 29, height: 29, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginRight: 8 },
+  safePillLabel: { color: COLORS.deepPurple, fontWeight: '800', fontSize: 10, letterSpacing: 0.8 },
   safePillValue: { color: COLORS.muted, fontSize: 10, marginTop: 2 },
-  locationPrompt: { backgroundColor: COLORS.white, borderRadius: 14, paddingHorizontal: 13, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', shadowColor: '#16233B', shadowOpacity: 0.11, shadowRadius: 9, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
-  locationPromptText: { flex: 1, marginLeft: 8, color: COLORS.ink, fontWeight: '700', fontSize: 13 },
-  mapControls: { position: 'absolute', right: 16, top: 18, gap: 9 },
-  mapControlButton: { width: 42, height: 42, borderRadius: 13, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', shadowColor: '#16233B', shadowOpacity: 0.13, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
-  mapMarker: { width: 45, height: 45, borderRadius: 23, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', borderWidth: 4, shadowColor: '#16233B', shadowOpacity: 0.2, shadowRadius: 5, shadowOffset: { width: 0, height: 2 }, elevation: 4 },
-  mapMarkerStale: { opacity: 0.45 },
-  mapMarkerText: { fontSize: 12, fontWeight: '900' },
-  mapAttribution: { position: 'absolute', bottom: 173, left: 8, backgroundColor: 'rgba(255,255,255,0.78)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 3 },
+  locationPrompt: { backgroundColor: COLORS.white, borderRadius: 18, paddingHorizontal: 12, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', shadowColor: COLORS.deepPurple, shadowOpacity: 0.1, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
+  locationPromptText: { flex: 1, marginLeft: 8, color: COLORS.deepPurple, fontWeight: '700', fontSize: 12 },
+  mapControls: { position: 'absolute', right: 16, bottom: 350 },
+  mapControlButton: { width: 48, height: 48, borderRadius: 24, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', shadowColor: COLORS.deepPurple, shadowOpacity: 0.14, shadowRadius: 9, shadowOffset: { width: 0, height: 3 }, elevation: 4 },
+  mapMarker: { width: 66, height: 66, borderRadius: 33, alignItems: 'center', justifyContent: 'center', borderWidth: 4, borderColor: COLORS.white, shadowColor: COLORS.deepPurple, shadowOpacity: 0.24, shadowRadius: 7, shadowOffset: { width: 0, height: 3 }, elevation: 7 },
+  mapMarkerStale: { opacity: 0.52 },
+  mapMarkerText: { color: COLORS.white, fontSize: 23, fontWeight: '800', letterSpacing: -0.5 },
+  mapAttribution: { position: 'absolute', bottom: 346, left: 7, backgroundColor: 'rgba(255,255,255,0.85)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
   attributionText: { color: '#43506A', fontSize: 8 },
-  mapBottomCard: { position: 'absolute', left: 12, right: 12, bottom: 12, backgroundColor: COLORS.white, borderRadius: 24, paddingHorizontal: 18, paddingTop: 8, paddingBottom: 15, shadowColor: '#16233B', shadowOpacity: 0.18, shadowRadius: 15, shadowOffset: { width: 0, height: 5 }, elevation: 8 },
-  cardHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#DDE2E9', alignSelf: 'center', marginBottom: 13 },
-  mapBottomHeader: { flexDirection: 'row', alignItems: 'center' },
-  mapBottomEyebrow: { color: COLORS.coral, fontSize: 9, fontWeight: '800', letterSpacing: 1.3, marginBottom: 4 },
-  mapBottomTitle: { color: COLORS.ink, fontSize: 17, fontWeight: '800' },
-  connectedAvatars: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center' },
-  moreAvatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.canvas, borderWidth: 2, borderColor: COLORS.white, alignItems: 'center', justifyContent: 'center', marginLeft: -5 },
-  moreAvatarText: { fontSize: 9, fontWeight: '800', color: COLORS.muted },
-  mapBottomDivider: { height: 1, backgroundColor: COLORS.border, marginVertical: 13 },
-  quickActions: { flexDirection: 'row', gap: 9 },
-  checkInButton: { flex: 1, height: 45, backgroundColor: COLORS.coral, borderRadius: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
-  checkInButtonText: { color: COLORS.white, fontWeight: '800', fontSize: 13 },
-  shareButton: { flex: 1, height: 45, backgroundColor: COLORS.canvas, borderRadius: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
-  shareButtonText: { color: COLORS.ink, fontWeight: '800', fontSize: 13 },
+  mapActions: { position: 'absolute', bottom: 285, left: 16, right: 16, flexDirection: 'row', gap: 10 },
+  mapActionButton: { flex: 1, minHeight: 47, borderRadius: 24, backgroundColor: COLORS.white, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 11, shadowColor: COLORS.deepPurple, shadowOpacity: 0.13, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 4 },
+  mapActionText: { color: COLORS.purple, fontSize: 13, fontWeight: '800' },
+  mapBottomCard: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 270, backgroundColor: '#FCFBFF', borderTopLeftRadius: 30, borderTopRightRadius: 30, paddingHorizontal: 20, paddingTop: 9, paddingBottom: 14, shadowColor: COLORS.deepPurple, shadowOpacity: 0.13, shadowRadius: 15, shadowOffset: { width: 0, height: -4 }, elevation: 8 },
+  cardHandle: { width: 38, height: 4, borderRadius: 2, backgroundColor: '#CBC8D3', alignSelf: 'center', marginBottom: 13 },
+  mapBottomHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
+  mapBottomHeaderCopy: { flex: 1 },
+  mapBottomTitle: { color: '#14131B', fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
+  mapBottomSubtitle: { color: COLORS.muted, fontSize: 11, marginTop: 3 },
+  mapPanelArrow: { width: 36, height: 36, borderRadius: 18, backgroundColor: COLORS.purpleSoft, alignItems: 'center', justifyContent: 'center' },
+  mapMemberScroll: { flex: 1 },
+  mapMemberList: { backgroundColor: COLORS.white, borderRadius: 22, borderWidth: 1, borderColor: '#E9E6EF', paddingHorizontal: 13, paddingVertical: 5 },
+  mapMemberRow: { height: 70, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F1EFF4' },
+  mapMemberCopy: { flex: 1, marginLeft: 11, marginRight: 6 },
+  mapMemberName: { color: '#18161D', fontSize: 15, fontWeight: '800' },
+  mapMemberStatus: { color: COLORS.muted, fontSize: 11, marginTop: 4 },
+  mapEmptyCard: { backgroundColor: COLORS.white, borderRadius: 22, borderWidth: 1, borderColor: '#E9E6EF', minHeight: 96, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', gap: 11 },
+  mapEmptyCopy: { flex: 1 },
+  mapEmptyTitle: { color: COLORS.deepPurple, fontSize: 14, fontWeight: '800' },
+  mapEmptyText: { color: COLORS.muted, fontSize: 11, marginTop: 4 },
   circleHero: { backgroundColor: COLORS.ink, borderRadius: 21, padding: 18, flexDirection: 'row', alignItems: 'center', marginBottom: 26 },
   circleHeroOrb: { width: 52, height: 52, borderRadius: 18, backgroundColor: COLORS.coral, alignItems: 'center', justifyContent: 'center' },
   circleHeroCopy: { flex: 1, paddingLeft: 13, paddingRight: 8 },
@@ -545,12 +572,12 @@ const styles = StyleSheet.create({
   privacyNote: { flexDirection: 'row', backgroundColor: '#EDF1F6', borderRadius: 15, padding: 13, marginBottom: 16, gap: 8 },
   privacyText: { flex: 1, color: COLORS.muted, fontSize: 10.5, lineHeight: 15 },
   versionText: { color: COLORS.subtle, fontSize: 10, textAlign: 'center', marginTop: 1 },
-  bottomTabs: { height: 76, backgroundColor: COLORS.white, borderTopWidth: 1, borderTopColor: COLORS.border, flexDirection: 'row', paddingHorizontal: 8, paddingTop: 8 },
+  bottomTabs: { height: 76, backgroundColor: COLORS.white, borderTopWidth: 1, borderTopColor: '#EFEAF7', flexDirection: 'row', paddingHorizontal: 8, paddingTop: 8 },
   tabButton: { flex: 1, alignItems: 'center', justifyContent: 'flex-start', gap: 4 },
   tabIconWrap: { width: 45, height: 31, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  tabIconWrapActive: { backgroundColor: COLORS.coralSoft },
+  tabIconWrapActive: { backgroundColor: COLORS.purpleSoft },
   tabLabel: { color: COLORS.muted, fontSize: 10, fontWeight: '700' },
-  tabLabelActive: { color: COLORS.coral },
+  tabLabelActive: { color: COLORS.purple },
   toast: { position: 'absolute', bottom: 88, left: 18, right: 18, borderRadius: 14, paddingVertical: 12, paddingHorizontal: 14, backgroundColor: COLORS.ink, flexDirection: 'row', alignItems: 'center', gap: 8, shadowColor: '#16233B', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 8 },
   toastText: { color: COLORS.white, flex: 1, fontSize: 12, fontWeight: '700', lineHeight: 17 },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(11, 23, 42, 0.35)', justifyContent: 'flex-end' },
