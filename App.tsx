@@ -3,12 +3,12 @@ import * as Location from 'expo-location';
 import { usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Switch,
@@ -438,11 +438,12 @@ export default function App() {
     return <YouScreen locationEnabled={locationEnabled} locationReady={locationReady} backgroundReady={backgroundReady} circleConnected={circleConnected} onToggleLocation={toggleLocation} circle={circle} onCircleSetup={() => router.push(circle ? '/circle' : '/create-circle')} onInvite={invite} onJoin={() => router.push('/join')} />;
   })();
 
-  return <SafeAreaView style={styles.appRoot}><StatusBar style="dark" />{activeTab !== 'map' && <Header circleName={circle?.circleName ?? 'No circle'} onSettings={() => router.replace('/you')} />}<View style={styles.mainContent}>{content}</View><BottomTabs activeTab={activeTab} onTabChange={(tab) => router.replace(`/${tab}`)} />{Boolean(toast) && <View style={styles.toast}><Icon name="information-circle" size={18} color={COLORS.white} /><Text style={styles.toastText}>{toast}</Text></View>}<CheckInModal visible={checkInVisible} onClose={() => setCheckInVisible(false)} onConfirm={checkIn} /><MemberModal member={selectedMember} onClose={() => setSelectedMember(null)} /></SafeAreaView>;
+  return <SafeAreaView style={[styles.appRoot, activeTab === 'map' && styles.mapAppRoot]}><StatusBar style="dark" />{activeTab !== 'map' && <Header circleName={circle?.circleName ?? 'No circle'} onSettings={() => router.replace('/you')} />}<View style={styles.mainContent}>{content}</View><BottomTabs activeTab={activeTab} onTabChange={(tab) => router.replace(`/${tab}`)} />{Boolean(toast) && <View style={styles.toast}><Icon name="information-circle" size={18} color={COLORS.white} /><Text style={styles.toastText}>{toast}</Text></View>}<CheckInModal visible={checkInVisible} onClose={() => setCheckInVisible(false)} onConfirm={checkIn} /><MemberModal member={selectedMember} onClose={() => setSelectedMember(null)} /></SafeAreaView>;
 }
 
 const styles = StyleSheet.create({
   appRoot: { flex: 1, backgroundColor: COLORS.canvas },
+  mapAppRoot: { backgroundColor: '#E5F4EE' },
   emptyNote: { color: COLORS.muted, fontSize: 12, lineHeight: 18, marginBottom: 18 },
   mainContent: { flex: 1 },
   header: { height: 76, backgroundColor: COLORS.white, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: COLORS.border },
