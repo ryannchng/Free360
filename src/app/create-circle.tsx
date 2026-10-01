@@ -11,7 +11,7 @@ const coral = '#FF6E61';
 
 export default function CreateCircleRoute() {
   const router = useRouter();
-  const [circleName, setCircleName] = useState('My Circle');
+  const [circleName, setCircleName] = useState('');
   const [setupCode, setSetupCode] = useState('');
   const [saving, setSaving] = useState(false);
 

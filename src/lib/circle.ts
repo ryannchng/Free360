@@ -142,11 +142,13 @@ export function decodeInvite(value: string): InvitePayload {
 }
 
 export async function createCircle(circleName: string, setupCode: string): Promise<CircleConfig> {
+  const name = circleName.trim();
+  if (!name) throw new Error('Enter a circle name.');
   const deviceId = await ensureBackendSession();
   const circleId = randomId();
   const config: CircleConfig = {
     version: 2, circleId, deviceId, encryptionKey: randomSecret(), projectUrl: getBackendUrl(),
-    circleName: circleName.trim() || 'My Circle', isOwner: true,
+    circleName: name, isOwner: true,
   };
   await saveCircle({ ...config, pending: true });
   try {

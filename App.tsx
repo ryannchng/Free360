@@ -4,7 +4,6 @@ import { usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -31,9 +30,8 @@ type Member = {
   role: string;
   status: string;
   lastSeen: string;
-  coordinate: { latitude: number; longitude: number };
+  coordinate: { latitude: number; longitude: number } | null;
   color: string;
-  battery: number;
   isYou?: boolean;
   isPaused?: boolean;
   isStale?: boolean;
@@ -59,14 +57,7 @@ const COLORS = {
   deepPurple: '#28154D',
 };
 
-const INITIAL_REGION = {
-  latitude: 40.742,
-  longitude: -73.991,
-  latitudeDelta: 0.024,
-  longitudeDelta: 0.024,
-};
-
-const selfMember: Member = { id: 'you', name: 'You', initials: 'YO', role: 'You', status: 'Sharing paused', lastSeen: 'No location yet', coordinate: INITIAL_REGION, color: COLORS.coral, battery: 0, isYou: true };
+const selfMember: Member = { id: 'you', name: 'You', initials: 'YO', role: 'You', status: 'Sharing paused', lastSeen: 'No location yet', coordinate: null, color: COLORS.coral, isYou: true };
 const STALE_AFTER_MS = 5 * 60 * 1000;
 
 function ageLabel(recordedAt: string, now: number) {
@@ -80,11 +71,10 @@ function Icon({ name, size = 21, color = COLORS.ink }: { name: IconName; size?: 
   return <Ionicons name={name} size={size} color={color} />;
 }
 
-function Avatar({ member, size = 48, showDot = false }: { member: Member; size?: number; showDot?: boolean }) {
+function Avatar({ member, size = 48 }: { member: Member; size?: number }) {
   return (
     <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: member.color }]}>
       <Text style={[styles.avatarText, { fontSize: size * 0.31 }]}>{member.initials}</Text>
-      {showDot && <View style={styles.onlineDot} />}
     </View>
   );
 }
@@ -111,16 +101,19 @@ function Header({ circleName, onSettings }: { circleName: string; onSettings: ()
   );
 }
 
-function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembers, circleConnected, onRequestLocation, onCheckIn, onRecenter, onOpenMember, onOpenCircle, onOpenSettings, onInvite, onCreateCircle, onJoinCircle, isOwner }: { currentCoordinate: { latitude: number; longitude: number }; locationEnabled: boolean; circleName: string; circleMembers: Member[]; circleConnected: boolean; onRequestLocation: () => void; onCheckIn: () => void; onRecenter: () => void; onOpenMember: (member: Member) => void; onOpenCircle: () => void; onOpenSettings: () => void; onInvite: () => void; onCreateCircle: () => void; onJoinCircle: () => void; isOwner: boolean }) {
+function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembers, circleConnected, onRequestLocation, onCheckIn, onOpenMember, onOpenCircle, onOpenSettings, onInvite, onCreateCircle, onJoinCircle, isOwner }: { currentCoordinate: { latitude: number; longitude: number } | null; locationEnabled: boolean; circleName: string; circleMembers: Member[]; circleConnected: boolean; onRequestLocation: () => void; onCheckIn: () => void; onOpenMember: (member: Member) => void; onOpenCircle: () => void; onOpenSettings: () => void; onInvite: () => void; onCreateCircle: () => void; onJoinCircle: () => void; isOwner: boolean }) {
   const mapRef = useRef<MapView>(null);
+  const sharedCoordinate = circleMembers.find((member) => !member.isPaused && member.coordinate)?.coordinate ?? null;
+  const mapCenter = circleName ? ((locationEnabled ? currentCoordinate : null) ?? sharedCoordinate) : null;
+  const mapLatitude = mapCenter?.latitude;
+  const mapLongitude = mapCenter?.longitude;
 
   useEffect(() => {
-    mapRef.current?.animateToRegion({ ...INITIAL_REGION, ...currentCoordinate }, 500);
-  }, [currentCoordinate]);
+    if (mapLatitude !== undefined && mapLongitude !== undefined) mapRef.current?.animateToRegion({ latitude: mapLatitude, longitude: mapLongitude, latitudeDelta: 0.024, longitudeDelta: 0.024 }, 500);
+  }, [mapLatitude, mapLongitude]);
 
   const recenter = () => {
-    mapRef.current?.animateToRegion({ ...INITIAL_REGION, ...currentCoordinate }, 450);
-    onRecenter();
+    if (mapCenter) mapRef.current?.animateToRegion({ ...mapCenter, latitudeDelta: 0.024, longitudeDelta: 0.024 }, 450);
   };
 
   const actionLabel = !circleName ? 'Create circle' : isOwner ? 'Invite someone' : locationEnabled ? 'Your circle' : 'Share location';
@@ -129,13 +122,14 @@ function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembe
 
   return (
     <View style={styles.mapScreen}>
-      <MapView ref={mapRef} style={StyleSheet.absoluteFill} initialRegion={INITIAL_REGION} mapType={Platform.OS === 'android' ? 'none' : 'standard'} showsCompass={false} showsBuildings={false} showsPointsOfInterests={false} showsUserLocation={false} toolbarEnabled={false}>
+      {mapCenter ? <MapView ref={mapRef} style={StyleSheet.absoluteFill} initialRegion={{ ...mapCenter, latitudeDelta: 0.024, longitudeDelta: 0.024 }} mapType={Platform.OS === 'android' ? 'none' : 'standard'} showsCompass={false} showsBuildings={false} showsPointsOfInterests={false} showsUserLocation={false} toolbarEnabled={false}>
         <UrlTile urlTemplate="https://tile.openstreetmap.org/{z}/{x}/{y}.png" maximumZ={19} flipY={false} />
         {circleMembers.filter((member) => !member.isPaused).map((member) => {
           const coordinate = member.isYou ? currentCoordinate : member.coordinate;
+          if (!coordinate) return null;
           return <Marker key={`${member.id}:${member.isStale ? 'stale' : 'live'}`} coordinate={coordinate} anchor={{ x: 0.5, y: 0.5 }} onPress={() => onOpenMember(member)} tracksViewChanges={false}><View style={[styles.mapMarker, member.isStale && styles.mapMarkerStale, { backgroundColor: member.color }]}><Text style={styles.mapMarkerText}>{member.initials}</Text></View></Marker>;
         })}
-      </MapView>
+      </MapView> : <View style={styles.mapNoLocation}><Icon name={circleName ? 'location-outline' : 'people-outline'} size={30} color={COLORS.purple} /><Text style={styles.mapNoLocationText}>{circleName ? 'No shared locations yet' : 'Start a private circle to see locations'}</Text></View>}
 
       <View style={styles.mapTopBar}>
         <Pressable style={styles.mapRoundButton} onPress={onOpenSettings} accessibilityLabel="Open settings"><Icon name="settings-outline" size={23} color={COLORS.purple} /></Pressable>
@@ -148,8 +142,7 @@ function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembe
         {!locationEnabled && <Pressable style={styles.locationPrompt} onPress={onRequestLocation}><Icon name="location-outline" size={17} color={COLORS.purple} /><Text style={styles.locationPromptText}>Turn on location sharing</Text><Icon name="arrow-forward" size={16} color={COLORS.purple} /></Pressable>}
       </View>
 
-      <View style={styles.mapControls}><Pressable style={styles.mapControlButton} onPress={recenter} accessibilityLabel="Center map on your location" hitSlop={6}><Icon name="locate" size={24} color={COLORS.purple} /></Pressable></View>
-      <View style={styles.mapAttribution}><Text style={styles.attributionText}>{'\u00A9 OpenStreetMap contributors'}</Text></View>
+      {mapCenter && <><View style={styles.mapControls}><Pressable style={styles.mapControlButton} onPress={recenter} accessibilityLabel="Center map on a shared location" hitSlop={6}><Icon name="locate" size={24} color={COLORS.purple} /></Pressable></View><View style={styles.mapAttribution}><Text style={styles.attributionText}>{'\u00A9 OpenStreetMap contributors'}</Text></View></>}
 
       <View style={styles.mapActions}>
         <Pressable style={styles.mapActionButton} onPress={circleName ? onCheckIn : onJoinCircle}><Icon name={circleName ? 'checkmark-circle' : 'qr-code-outline'} size={21} color={COLORS.purple} /><Text style={styles.mapActionText}>{circleName ? 'Check in' : 'Join with QR'}</Text></Pressable>
@@ -165,15 +158,20 @@ function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembe
   );
 }
 
-function CircleScreen({ circleMembers, circleName, onInvite, onOpenMember }: { circleMembers: Member[]; circleName: string; onInvite: () => void; onOpenMember: (member: Member) => void }) {
+function CircleScreen({ circleMembers, circle, onInvite, onCreateCircle, onJoin, onOpenMember }: { circleMembers: Member[]; circle: CircleConfig | null; onInvite: () => void; onCreateCircle: () => void; onJoin: () => void; onOpenMember: (member: Member) => void }) {
   return (
     <ScrollView style={styles.contentScreen} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
-      <SectionTitle eyebrow="YOUR CIRCLE" title={circleName} action="Manage" onAction={() => Alert.alert('Circle settings', 'Private-circle management is coming next.')} />
-      <View style={styles.circleHero}><View style={styles.circleHeroOrb}><Icon name="people" size={28} color={COLORS.white} /></View><View style={styles.circleHeroCopy}><Text style={styles.circleHeroTitle}>Your private circle</Text><Text style={styles.circleHeroBody}>Known devices appear after they share a location. Invite someone you trust to join.</Text></View><Pressable style={styles.circleInviteSmall} onPress={onInvite}><Icon name="add" size={19} color={COLORS.coral} /></Pressable></View>
-      <SectionTitle eyebrow="MEMBERS" title={`${circleMembers.length} ${circleMembers.length === 1 ? 'person' : 'people'}`} />
-      <View style={styles.memberList}>{circleMembers.map((member, index) => <Pressable key={member.id} style={[styles.memberRow, index === circleMembers.length - 1 && styles.memberRowLast]} onPress={() => onOpenMember(member)}><Avatar member={member} size={48} /><View style={styles.memberCopy}><View style={styles.memberNameRow}><Text style={styles.memberName}>{member.name}</Text>{member.isYou && <Text style={styles.youLabel}>YOU</Text>}</View><Text style={styles.memberStatus}>{member.status} · {member.lastSeen}</Text></View><View style={styles.memberTrailing}><Icon name="chevron-forward" size={18} color={COLORS.subtle} /></View></Pressable>)}</View>
-      <Pressable style={styles.inviteButton} onPress={onInvite}><Icon name="person-add-outline" size={19} color={COLORS.coral} /><Text style={styles.inviteButtonText}>Invite a circle member</Text><Icon name="arrow-forward" size={17} color={COLORS.coral} /></Pressable>
-      <Text style={styles.emptyNote}>Saved places and arrival alerts are not available yet.</Text>
+      <SectionTitle eyebrow="YOUR CIRCLE" title={circle?.circleName ?? 'Your circle'} />
+      {circle ? <>
+        <View style={styles.circleHero}><View style={styles.circleHeroOrb}><Icon name="people" size={28} color={COLORS.white} /></View><View style={styles.circleHeroCopy}><Text style={styles.circleHeroTitle}>Your private circle</Text><Text style={styles.circleHeroBody}>Devices appear here after they share a location.</Text></View>{circle.isOwner && <Pressable style={styles.circleInviteSmall} onPress={onInvite} accessibilityLabel="Invite a circle member"><Icon name="add" size={19} color={COLORS.coral} /></Pressable>}</View>
+        <SectionTitle eyebrow="DEVICES" title={`${circleMembers.length} known device${circleMembers.length === 1 ? '' : 's'}`} />
+        <View style={styles.memberList}>{circleMembers.map((member, index) => <Pressable key={member.id} style={[styles.memberRow, index === circleMembers.length - 1 && styles.memberRowLast]} onPress={() => onOpenMember(member)}><Avatar member={member} size={48} /><View style={styles.memberCopy}><View style={styles.memberNameRow}><Text style={styles.memberName}>{member.name}</Text>{member.isYou && <Text style={styles.youLabel}>YOU</Text>}</View><Text style={styles.memberStatus}>{member.status} · {member.lastSeen}</Text></View><View style={styles.memberTrailing}><Icon name="chevron-forward" size={18} color={COLORS.subtle} /></View></Pressable>)}</View>
+        {circle.isOwner && <Pressable style={styles.inviteButton} onPress={onInvite}><Icon name="person-add-outline" size={19} color={COLORS.coral} /><Text style={styles.inviteButtonText}>Invite a circle member</Text><Icon name="arrow-forward" size={17} color={COLORS.coral} /></Pressable>}
+      </> : <>
+        <Text style={styles.emptyNote}>Create a circle for your group or scan an invitation from its owner.</Text>
+        <Pressable style={styles.inviteButton} onPress={onCreateCircle}><Icon name="people-outline" size={19} color={COLORS.coral} /><Text style={styles.inviteButtonText}>Create a circle</Text><Icon name="arrow-forward" size={17} color={COLORS.coral} /></Pressable>
+        <Pressable style={styles.fullWidthAction} onPress={onJoin}><Icon name="qr-code-outline" size={19} color={COLORS.coral} /><Text style={styles.fullWidthActionText}>Join with invitation QR</Text><Icon name="arrow-forward" size={17} color={COLORS.coral} /></Pressable>
+      </>}
     </ScrollView>
   );
 }
@@ -182,10 +180,10 @@ function ActivityScreen({ onCheckIn, checkIns, circle }: { onCheckIn: () => void
   return (
     <ScrollView style={styles.contentScreen} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
       <SectionTitle eyebrow="ENCRYPTED UPDATES" title="Circle activity" />
-      <Text style={styles.emptyNote}>Encrypted check-ins appear here. This is not an emergency monitoring service.</Text>
-      <Text style={styles.timelineLabel}>RECENT CHECK-INS</Text>
-      {checkIns.length ? <View style={styles.timeline}>{checkIns.map(({ deviceId, payload }, index) => <ActivityItem key={payload.id} icon="checkmark-circle" tone="mint" time={new Date(payload.recordedAt).toLocaleString()} title={deviceId === circle?.deviceId ? 'You checked in' : `Member ${deviceId.slice(0, 6)} checked in`} body={payload.message || 'No note'} isLast={index === checkIns.length - 1} />)}</View> : <Text style={styles.emptyNote}>No check-ins yet.</Text>}
-      <Pressable style={styles.fullWidthAction} onPress={onCheckIn}><Icon name="checkmark-circle-outline" size={19} color={COLORS.coral} /><Text style={styles.fullWidthActionText}>Send a check-in to your circle</Text><Icon name="arrow-forward" size={17} color={COLORS.coral} /></Pressable>
+      <Text style={styles.emptyNote}>{circle ? 'Check-ins from your circle appear here.' : 'Create or join a circle to see check-ins.'}</Text>
+      {circle && <Text style={styles.timelineLabel}>RECENT CHECK-INS</Text>}
+      {checkIns.length ? <View style={styles.timeline}>{checkIns.map(({ deviceId, payload }, index) => <ActivityItem key={payload.id} icon="checkmark-circle" tone="mint" time={new Date(payload.recordedAt).toLocaleString()} title={deviceId === circle?.deviceId ? 'You checked in' : `Member ${deviceId.slice(0, 6)} checked in`} body={payload.message || 'No note'} isLast={index === checkIns.length - 1} />)}</View> : circle && <Text style={styles.emptyNote}>No check-ins yet.</Text>}
+      {circle && <Pressable style={styles.fullWidthAction} onPress={onCheckIn}><Icon name="checkmark-circle-outline" size={19} color={COLORS.coral} /><Text style={styles.fullWidthActionText}>Send a check-in to your circle</Text><Icon name="arrow-forward" size={17} color={COLORS.coral} /></Pressable>}
     </ScrollView>
   );
 }
@@ -196,16 +194,16 @@ function ActivityItem({ icon, tone, time, title, body, isLast = false }: { icon:
   return <View style={styles.timelineItem}><View style={styles.timelineRail}><View style={[styles.timelineIcon, { backgroundColor: tone === 'blue' ? COLORS.blueSoft : tone === 'coral' ? COLORS.coralSoft : tone === 'mint' ? COLORS.mintSoft : COLORS.yellowSoft }]}><Icon name={iconName} size={17} color={palette} /></View>{!isLast && <View style={styles.timelineLine} />}</View><View style={styles.timelineCopy}><Text style={styles.timelineTime}>{time}</Text><Text style={styles.timelineTitle}>{title}</Text><Text style={styles.timelineBody}>{body}</Text></View></View>;
 }
 
-function YouScreen({ locationEnabled, locationReady, backgroundReady, circleConnected, onToggleLocation, onBackgroundLocation, circle, onCircleSetup, onInvite, onJoin }: { locationEnabled: boolean; locationReady: boolean; backgroundReady: boolean; circleConnected: boolean; onToggleLocation: () => void; onBackgroundLocation: () => void; circle: CircleConfig | null; onCircleSetup: () => void; onInvite: () => void; onJoin: () => void }) {
+function YouScreen({ locationEnabled, locationReady, backgroundReady, circleConnected, onToggleLocation, circle, onCircleSetup, onInvite, onJoin }: { locationEnabled: boolean; locationReady: boolean; backgroundReady: boolean; circleConnected: boolean; onToggleLocation: () => void; circle: CircleConfig | null; onCircleSetup: () => void; onInvite: () => void; onJoin: () => void }) {
   return (
     <ScrollView style={styles.contentScreen} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
       <SectionTitle eyebrow="YOUR DEVICE" title="You" />
-      <View style={styles.profileCard}><Avatar member={selfMember} size={68} /><View style={styles.profileCopy}><Text style={styles.profileName}>This device</Text><Text style={styles.profileEmail}>No email or password required</Text><View style={styles.profileStatus}><View style={styles.profileStatusDot} /><Text style={styles.profileStatusText}>{circle ? locationEnabled ? 'Sharing with your circle' : 'Location sharing paused' : 'No circle configured'}</Text></View></View></View>
+      <View style={styles.profileCard}><Avatar member={selfMember} size={68} /><View style={styles.profileCopy}><Text style={styles.profileName}>This device</Text><Text style={styles.profileEmail}>No email or password required</Text><View style={styles.profileStatus}><View style={[styles.profileStatusDot, !locationEnabled && styles.profileStatusInactive]} /><Text style={[styles.profileStatusText, !locationEnabled && styles.profileStatusTextInactive]}>{circle ? locationEnabled ? 'Sharing with your circle' : 'Location sharing paused' : 'No circle configured'}</Text></View></View></View>
       <SectionTitle eyebrow="LOCATION" title="Sharing controls" />
       <View style={styles.settingsCard}>
         <View style={styles.settingRow}><View style={[styles.settingIcon, { backgroundColor: COLORS.coralSoft }]}><Icon name="location" size={19} color={COLORS.coral} /></View><View style={styles.settingCopy}><Text style={styles.settingTitle}>Location sharing</Text><Text style={styles.settingDescription}>{!locationReady ? 'Checking device sharing state…' : locationEnabled ? 'Location updates enabled on this device' : 'Location sharing is paused'}</Text></View><Switch value={locationEnabled} disabled={!locationReady} onValueChange={onToggleLocation} trackColor={{ false: '#D6DCE5', true: '#FFB8B1' }} thumbColor={locationEnabled ? COLORS.coral : '#FFFFFF'} /></View>
         <View style={styles.settingsDivider} />
-        <Pressable style={styles.settingRow} onPress={onBackgroundLocation}><View style={[styles.settingIcon, { backgroundColor: COLORS.blueSoft }]}><Icon name="navigate" size={19} color={COLORS.blue} /></View><View style={styles.settingCopy}><Text style={styles.settingTitle}>Background updates</Text><Text style={styles.settingDescription}>{backgroundReady ? 'Registered on this device' : 'Not active · development build required'}</Text></View><View style={[styles.statusCheck, { backgroundColor: backgroundReady ? COLORS.mintSoft : COLORS.yellowSoft }]}><Icon name={backgroundReady ? 'checkmark' : 'information'} size={15} color={backgroundReady ? COLORS.mint : '#C88313'} /></View></Pressable>
+        <View style={styles.settingRow}><View style={[styles.settingIcon, { backgroundColor: COLORS.blueSoft }]}><Icon name="navigate" size={19} color={COLORS.blue} /></View><View style={styles.settingCopy}><Text style={styles.settingTitle}>Background updates</Text><Text style={styles.settingDescription}>{backgroundReady ? 'Registered on this device' : 'Not active · development build required'}</Text></View><View style={[styles.statusCheck, { backgroundColor: backgroundReady ? COLORS.mintSoft : COLORS.yellowSoft }]}><Icon name={backgroundReady ? 'checkmark' : 'information'} size={15} color={backgroundReady ? COLORS.mint : '#C88313'} /></View></View>
       </View>
       <View style={styles.privacyNote}><Icon name="lock-closed-outline" size={17} color={COLORS.muted} /><Text style={styles.privacyText}>Your location is shared only with members of your circle. You can pause sharing any time.</Text></View>
       <SectionTitle eyebrow="YOUR GROUP" title="Private circle" action={circle?.isOwner ? 'Invite' : undefined} onAction={onInvite} />
@@ -216,8 +214,6 @@ function YouScreen({ locationEnabled, locationReady, backgroundReady, circleConn
         </Pressable>
         {!circle && <><View style={styles.settingsDivider} /><Pressable style={styles.settingRow} onPress={onJoin}><View style={[styles.settingIcon, { backgroundColor: COLORS.blueSoft }]}><Icon name="qr-code-outline" size={19} color={COLORS.blue} /></View><View style={styles.settingCopy}><Text style={styles.settingTitle}>Join with invitation QR</Text><Text style={styles.settingDescription}>No email sign-up needed</Text></View><Icon name="chevron-forward" size={18} color={COLORS.subtle} /></Pressable></>}
       </View>
-      <Text style={styles.emptyNote}>Notifications, saved places, and automatic safety alerts are not available in this MVP.</Text>
-      <Text style={styles.versionText}>Free360 preview · v0.1.0</Text>
     </ScrollView>
   );
 }
@@ -228,13 +224,13 @@ function BottomTabs({ activeTab, onTabChange }: { activeTab: Tab; onTabChange: (
 }
 
 function CheckInModal({ visible, onClose, onConfirm }: { visible: boolean; onClose: () => void; onConfirm: (message: string) => void }) {
-  const [message, setMessage] = useState('I’m safe and on my way.');
-  return <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}><KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}><Pressable style={styles.modalDismissArea} onPress={onClose} /><View style={styles.checkInSheet}><View style={styles.sheetHandle} /><View style={styles.sheetIcon}><Icon name="checkmark-circle" size={32} color={COLORS.mint} /></View><Text style={styles.sheetTitle}>Check in with your circle</Text><Text style={styles.sheetBody}>Let everyone know you’re okay. This will appear in your circle activity.</Text><TextInput value={message} onChangeText={setMessage} style={styles.messageInput} placeholder="Add a note" placeholderTextColor={COLORS.subtle} multiline /><Pressable style={styles.confirmCheckIn} onPress={() => onConfirm(message)}><Text style={styles.confirmCheckInText}>Send check-in</Text><Icon name="arrow-forward" size={18} color={COLORS.white} /></Pressable><Pressable style={styles.cancelButton} onPress={onClose}><Text style={styles.cancelButtonText}>Not now</Text></Pressable></View></KeyboardAvoidingView></Modal>;
+  const [message, setMessage] = useState('');
+  return <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}><KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}><Pressable style={styles.modalDismissArea} onPress={onClose} /><View style={styles.checkInSheet}><View style={styles.sheetHandle} /><View style={styles.sheetIcon}><Icon name="checkmark-circle" size={32} color={COLORS.mint} /></View><Text style={styles.sheetTitle}>Check in with your circle</Text><Text style={styles.sheetBody}>Send an encrypted check-in. Add a note if you want to.</Text><TextInput value={message} onChangeText={setMessage} style={styles.messageInput} placeholder="Optional note" placeholderTextColor={COLORS.subtle} multiline /><Pressable style={styles.confirmCheckIn} onPress={() => onConfirm(message)}><Text style={styles.confirmCheckInText}>Send check-in</Text><Icon name="arrow-forward" size={18} color={COLORS.white} /></Pressable><Pressable style={styles.cancelButton} onPress={onClose}><Text style={styles.cancelButtonText}>Not now</Text></Pressable></View></KeyboardAvoidingView></Modal>;
 }
 
 function MemberModal({ member, onClose }: { member: Member | null; onClose: () => void }) {
   if (!member) return null;
-  return <Modal visible={Boolean(member)} transparent animationType="slide" onRequestClose={onClose}><View style={styles.modalBackdrop}><Pressable style={styles.modalDismissArea} onPress={onClose} /><View style={styles.memberSheet}><View style={styles.sheetHandle} /><View style={styles.memberSheetHeader}><Avatar member={member} size={60} showDot={!member.isYou} /><View style={styles.memberSheetCopy}><Text style={styles.sheetTitle}>{member.name}</Text><Text style={styles.memberSheetRole}>{member.role} · {member.status}</Text></View><Pressable onPress={onClose} hitSlop={8}><Icon name="close" size={22} color={COLORS.muted} /></Pressable></View><View style={styles.memberDetailGrid}><DetailStat icon="location" label="Location" value={member.status} /><DetailStat icon="time-outline" label="Last update" value={member.lastSeen.replace('Updated ', '')} /><DetailStat icon="battery-half" label="Battery" value={`${member.battery}%`} /></View><Pressable style={styles.outlineSheetButton} onPress={onClose}><Icon name="navigate-outline" size={18} color={COLORS.ink} /><Text style={styles.outlineSheetButtonText}>View on map</Text></Pressable></View></View></Modal>;
+  return <Modal visible={Boolean(member)} transparent animationType="slide" onRequestClose={onClose}><View style={styles.modalBackdrop}><Pressable style={styles.modalDismissArea} onPress={onClose} /><View style={styles.memberSheet}><View style={styles.sheetHandle} /><View style={styles.memberSheetHeader}><Avatar member={member} size={60} /><View style={styles.memberSheetCopy}><Text style={styles.sheetTitle}>{member.name}</Text><Text style={styles.memberSheetRole}>{member.role} · {member.status}</Text></View><Pressable onPress={onClose} hitSlop={8}><Icon name="close" size={22} color={COLORS.muted} /></Pressable></View><View style={styles.memberDetailGrid}><DetailStat icon="location" label="Sharing" value={member.status} /><DetailStat icon="time-outline" label="Last update" value={member.lastSeen} /></View></View></View></Modal>;
 }
 
 function DetailStat({ icon, label, value }: { icon: IconName; label: string; value: string }) {
@@ -248,8 +244,7 @@ export default function App() {
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [locationReady, setLocationReady] = useState(Platform.OS === 'web');
   const [backgroundReady, setBackgroundReady] = useState(false);
-  const [currentCoordinate, setCurrentCoordinate] = useState<{ latitude: number; longitude: number }>({ latitude: INITIAL_REGION.latitude, longitude: INITIAL_REGION.longitude });
-  const [hasCurrentLocation, setHasCurrentLocation] = useState(false);
+  const [currentCoordinate, setCurrentCoordinate] = useState<{ latitude: number; longitude: number } | null>(null);
   const [circle, setCircle] = useState<CircleConfig | null>(null);
   const [remoteSnapshots, setRemoteSnapshots] = useState<Record<string, CircleSnapshot>>({});
   const [checkIns, setCheckIns] = useState<{ deviceId: string; payload: CheckIn }[]>([]);
@@ -287,7 +282,6 @@ export default function App() {
         if (permission.granted && !watcher.current && !cancelled) {
           watcher.current = await Location.watchPositionAsync({ accuracy: Location.Accuracy.Balanced, distanceInterval: 20, timeInterval: 15000 }, (position) => {
             setCurrentCoordinate({ latitude: position.coords.latitude, longitude: position.coords.longitude });
-            setHasCurrentLocation(true);
             const currentCircle = circleRef.current;
             if (currentCircle) void publishLocation(currentCircle, { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy }, new Date(position.timestamp).toISOString()).catch((error) => console.warn('[Free360] Foreground location queued:', error));
           });
@@ -320,7 +314,7 @@ export default function App() {
 
   const mapMembers = useMemo(() => {
     if (!circle) return [];
-    const localMember = { ...selfMember, color: COLORS.deepPurple, coordinate: currentCoordinate, role: circle.isOwner ? 'Circle owner' : 'Circle member', status: locationEnabled ? 'Location enabled' : 'Sharing paused', lastSeen: locationEnabled && hasCurrentLocation ? 'On this device' : 'No live location', isPaused: !locationEnabled || !hasCurrentLocation };
+    const localMember = { ...selfMember, color: COLORS.deepPurple, coordinate: currentCoordinate, role: circle.isOwner ? 'Circle owner' : 'Circle member', status: locationEnabled ? 'Location enabled' : 'Sharing paused', lastSeen: locationEnabled && currentCoordinate ? 'On this device' : 'No live location', isPaused: !locationEnabled || !currentCoordinate };
     const remoteMembers = Object.entries(remoteSnapshots).map(([deviceId, snapshot], index) => ({
       id: deviceId,
       name: `Member ${deviceId.slice(0, 6)}`,
@@ -328,14 +322,13 @@ export default function App() {
       role: 'Circle member',
       status: snapshot.type === 'paused' ? 'Sharing paused' : now - Date.parse(snapshot.recordedAt) > STALE_AFTER_MS ? 'Location stale' : 'Location shared',
       lastSeen: ageLabel(snapshot.recordedAt, now),
-      coordinate: snapshot.type === 'location' ? { latitude: snapshot.latitude, longitude: snapshot.longitude } : INITIAL_REGION,
+      coordinate: snapshot.type === 'location' ? { latitude: snapshot.latitude, longitude: snapshot.longitude } : null,
       color: ['#075F58', '#3C9AB7', '#777F8C', '#5C3C90'][index % 4],
-      battery: 0,
       isPaused: snapshot.type === 'paused',
       isStale: snapshot.type === 'location' && now - Date.parse(snapshot.recordedAt) > STALE_AFTER_MS,
     }));
     return [localMember, ...remoteMembers];
-  }, [circle, currentCoordinate, hasCurrentLocation, locationEnabled, remoteSnapshots, now]);
+  }, [circle, currentCoordinate, locationEnabled, remoteSnapshots, now]);
 
   const shareLocation = (position: Location.LocationObject) => {
     const currentCircle = circleRef.current;
@@ -350,7 +343,7 @@ export default function App() {
   const requestLocation = async () => {
     if (!circleRef.current) { router.push('/create-circle'); return; }
     if (Platform.OS === 'web') {
-      setToast('Location preview is available on a physical device.');
+      setToast('Location sharing is available in the mobile app.');
       return;
     }
     try {
@@ -362,12 +355,10 @@ export default function App() {
 
       const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       setCurrentCoordinate({ latitude: current.coords.latitude, longitude: current.coords.longitude });
-      setHasCurrentLocation(true);
       shareLocation(current);
       if (!watcher.current) {
         watcher.current = await Location.watchPositionAsync({ accuracy: Location.Accuracy.Balanced, distanceInterval: 20, timeInterval: 15000 }, (position) => {
           setCurrentCoordinate({ latitude: position.coords.latitude, longitude: position.coords.longitude });
-          setHasCurrentLocation(true);
           shareLocation(position);
         });
       }
@@ -441,10 +432,10 @@ export default function App() {
   };
 
   const content = (() => {
-    if (activeTab === 'map') return <MapScreen currentCoordinate={currentCoordinate} locationEnabled={locationEnabled} circleName={circle?.circleName ?? ''} circleMembers={mapMembers} circleConnected={circleConnected} isOwner={Boolean(circle?.isOwner)} onRequestLocation={requestLocation} onCheckIn={() => setCheckInVisible(true)} onRecenter={() => setToast('Map centered on your location.')} onOpenMember={setSelectedMember} onOpenCircle={() => router.replace('/circle')} onOpenSettings={() => router.replace('/you')} onInvite={invite} onCreateCircle={() => router.push('/create-circle')} onJoinCircle={() => router.push('/join')} />;
-    if (activeTab === 'circle') return <CircleScreen circleMembers={mapMembers} circleName={circle?.circleName ?? 'No circle yet'} onInvite={invite} onOpenMember={setSelectedMember} />;
+    if (activeTab === 'map') return <MapScreen currentCoordinate={currentCoordinate} locationEnabled={locationEnabled} circleName={circle?.circleName ?? ''} circleMembers={mapMembers} circleConnected={circleConnected} isOwner={Boolean(circle?.isOwner)} onRequestLocation={requestLocation} onCheckIn={() => setCheckInVisible(true)} onOpenMember={setSelectedMember} onOpenCircle={() => router.replace('/circle')} onOpenSettings={() => router.replace('/you')} onInvite={invite} onCreateCircle={() => router.push('/create-circle')} onJoinCircle={() => router.push('/join')} />;
+    if (activeTab === 'circle') return <CircleScreen circleMembers={mapMembers} circle={circle} onInvite={invite} onCreateCircle={() => router.push('/create-circle')} onJoin={() => router.push('/join')} onOpenMember={setSelectedMember} />;
     if (activeTab === 'activity') return <ActivityScreen circle={circle} checkIns={checkIns} onCheckIn={() => setCheckInVisible(true)} />;
-    return <YouScreen locationEnabled={locationEnabled} locationReady={locationReady} backgroundReady={backgroundReady} circleConnected={circleConnected} onToggleLocation={toggleLocation} onBackgroundLocation={() => setToast(backgroundReady ? 'Background location is registered on this device.' : 'Background location needs permission and a development build.')} circle={circle} onCircleSetup={() => circle ? setToast(circleConnected ? 'Your group project is connected.' : 'Your group project is offline.') : router.push('/create-circle')} onInvite={invite} onJoin={() => router.push('/join')} />;
+    return <YouScreen locationEnabled={locationEnabled} locationReady={locationReady} backgroundReady={backgroundReady} circleConnected={circleConnected} onToggleLocation={toggleLocation} circle={circle} onCircleSetup={() => router.push(circle ? '/circle' : '/create-circle')} onInvite={invite} onJoin={() => router.push('/join')} />;
   })();
 
   return <SafeAreaView style={styles.appRoot}><StatusBar style="dark" />{activeTab !== 'map' && <Header circleName={circle?.circleName ?? 'No circle'} onSettings={() => router.replace('/you')} />}<View style={styles.mainContent}>{content}</View><BottomTabs activeTab={activeTab} onTabChange={(tab) => router.replace(`/${tab}`)} />{Boolean(toast) && <View style={styles.toast}><Icon name="information-circle" size={18} color={COLORS.white} /><Text style={styles.toastText}>{toast}</Text></View>}<CheckInModal visible={checkInVisible} onClose={() => setCheckInVisible(false)} onConfirm={checkIn} /><MemberModal member={selectedMember} onClose={() => setSelectedMember(null)} /></SafeAreaView>;
@@ -459,8 +450,6 @@ const styles = StyleSheet.create({
   brandCopy: { marginLeft: 10, flex: 1 },
   brandName: { fontSize: 19, fontWeight: '800', color: COLORS.ink, letterSpacing: -0.4 },
   brandSubline: { color: COLORS.subtle, fontWeight: '700', fontSize: 8.5, letterSpacing: 1.5, marginTop: 3 },
-  headerIconButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: COLORS.canvas, alignItems: 'center', justifyContent: 'center', marginRight: 10 },
-  notificationDot: { position: 'absolute', top: 8, right: 8, width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.coral, borderWidth: 1, borderColor: COLORS.canvas },
   headerAvatarButton: { borderRadius: 21, padding: 1, borderWidth: 1, borderColor: COLORS.border },
   contentScreen: { flex: 1, backgroundColor: COLORS.canvas },
   contentContainer: { padding: 20, paddingBottom: 34 },
@@ -472,6 +461,8 @@ const styles = StyleSheet.create({
   avatarText: { color: COLORS.white, fontWeight: '800', letterSpacing: -0.5 },
   onlineDot: { position: 'absolute', right: -1, bottom: 0, width: 12, height: 12, backgroundColor: COLORS.mint, borderRadius: 6, borderWidth: 2, borderColor: COLORS.white },
   mapScreen: { flex: 1, overflow: 'hidden', backgroundColor: '#E5F4EE' },
+  mapNoLocation: { position: 'absolute', top: '30%', left: 30, right: 30, alignItems: 'center', gap: 10 },
+  mapNoLocationText: { color: COLORS.deepPurple, fontSize: 15, fontWeight: '700', textAlign: 'center' },
   mapTopBar: { position: 'absolute', top: 12, left: 16, right: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
   mapRoundButton: { width: 46, height: 46, borderRadius: 23, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', shadowColor: COLORS.deepPurple, shadowOpacity: 0.14, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 4 },
   mapCirclePicker: { flex: 1, height: 48, borderRadius: 24, backgroundColor: COLORS.white, paddingHorizontal: 17, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, shadowColor: COLORS.deepPurple, shadowOpacity: 0.13, shadowRadius: 9, shadowOffset: { width: 0, height: 3 }, elevation: 4 },
@@ -525,23 +516,8 @@ const styles = StyleSheet.create({
   youLabel: { color: COLORS.coral, fontSize: 8, letterSpacing: 0.7, fontWeight: '900' },
   memberStatus: { color: COLORS.muted, fontSize: 11.5, marginTop: 5 },
   memberTrailing: { alignItems: 'flex-end', gap: 7 },
-  batteryRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  batteryText: { color: COLORS.muted, fontSize: 10 },
   inviteButton: { height: 54, borderRadius: 16, backgroundColor: COLORS.coralSoft, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, marginBottom: 19, gap: 9 },
   inviteButtonText: { flex: 1, color: COLORS.coral, fontWeight: '800', fontSize: 13 },
-  placeCard: { backgroundColor: COLORS.white, borderRadius: 17, padding: 13, flexDirection: 'row', alignItems: 'center', marginBottom: 9 },
-  placeIcon: { width: 39, height: 39, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  placeCopy: { flex: 1, marginLeft: 11 },
-  placeName: { color: COLORS.ink, fontWeight: '800', fontSize: 13 },
-  placeAddress: { color: COLORS.muted, fontSize: 11, marginTop: 4 },
-  activitySummary: { backgroundColor: COLORS.white, borderRadius: 19, padding: 15, flexDirection: 'row', alignItems: 'center', marginBottom: 27 },
-  activitySummaryIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: COLORS.mintSoft, alignItems: 'center', justifyContent: 'center' },
-  activitySummaryCopy: { flex: 1, marginLeft: 11 },
-  activitySummaryTitle: { color: COLORS.ink, fontWeight: '800', fontSize: 13 },
-  activitySummaryText: { color: COLORS.muted, fontSize: 10.5, marginTop: 4 },
-  pill: { flexDirection: 'row', alignItems: 'center', borderRadius: 99, paddingHorizontal: 8, paddingVertical: 6, gap: 4 },
-  pillDot: { width: 5, height: 5, borderRadius: 3 },
-  pillText: { fontSize: 9.5, fontWeight: '800' },
   timelineLabel: { color: COLORS.subtle, fontSize: 10, fontWeight: '800', letterSpacing: 1.3, marginBottom: 13 },
   timeline: { backgroundColor: COLORS.white, borderRadius: 20, padding: 17, marginBottom: 13 },
   timelineItem: { flexDirection: 'row', minHeight: 76 },
@@ -561,6 +537,8 @@ const styles = StyleSheet.create({
   profileStatus: { flexDirection: 'row', alignItems: 'center', marginTop: 9, gap: 5 },
   profileStatusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.mint },
   profileStatusText: { color: COLORS.mint, fontSize: 10, fontWeight: '700' },
+  profileStatusInactive: { backgroundColor: COLORS.subtle },
+  profileStatusTextInactive: { color: COLORS.muted },
   settingsCard: { backgroundColor: COLORS.white, borderRadius: 20, paddingHorizontal: 15, marginBottom: 20 },
   settingRow: { minHeight: 72, flexDirection: 'row', alignItems: 'center' },
   settingIcon: { width: 39, height: 39, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
@@ -600,6 +578,4 @@ const styles = StyleSheet.create({
   detailStat: { flex: 1, backgroundColor: COLORS.canvas, borderRadius: 14, minHeight: 74, padding: 10 },
   detailStatLabel: { color: COLORS.muted, fontSize: 9, marginTop: 8 },
   detailStatValue: { color: COLORS.ink, fontWeight: '800', fontSize: 11, marginTop: 3 },
-  outlineSheetButton: { height: 48, borderWidth: 1, borderColor: COLORS.border, borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 },
-  outlineSheetButtonText: { color: COLORS.ink, fontWeight: '800', fontSize: 12 },
 });
