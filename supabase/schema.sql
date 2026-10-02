@@ -1,5 +1,7 @@
--- Run once in the SQL editor of a fresh Supabase project dedicated to one group.
+-- Run in the SQL editor of a Supabase project dedicated to one group.
 -- The SQL editor runs as the project administrator. Do not expose a service-role key in the app.
+-- The script is idempotent; re-run it after updating the app to apply schema changes
+-- (for example, to add 24-hour location history to an existing project).
 create table if not exists public.free360_circles (
   id uuid primary key,
   singleton boolean not null default true unique check (singleton),
@@ -45,16 +47,29 @@ create table if not exists public.free360_events (
 );
 create index if not exists free360_events_recent_idx on public.free360_events(circle_id, received_at desc, id desc);
 
+-- Append-only location trail, encrypted like snapshots. Rows older than 24 hours
+-- are deleted by free360_publish_history on every publish.
+create table if not exists public.free360_history (
+  id bigint generated always as identity primary key,
+  circle_id uuid not null references public.free360_circles(id) on delete cascade,
+  device_id uuid not null references auth.users(id) on delete cascade,
+  envelope jsonb not null,
+  received_at timestamptz not null default now()
+);
+create index if not exists free360_history_recent_idx on public.free360_history(circle_id, received_at desc, id desc);
+create index if not exists free360_history_device_idx on public.free360_history(circle_id, device_id, id desc);
+
 alter table public.free360_circles enable row level security;
 alter table public.free360_setup enable row level security;
 alter table public.free360_members enable row level security;
 alter table public.free360_invites enable row level security;
 alter table public.free360_snapshots enable row level security;
 alter table public.free360_events enable row level security;
+alter table public.free360_history enable row level security;
 
 revoke all on public.free360_circles, public.free360_setup, public.free360_members, public.free360_invites,
-  public.free360_snapshots, public.free360_events from anon, authenticated;
-grant select on public.free360_snapshots, public.free360_events to authenticated;
+  public.free360_snapshots, public.free360_events, public.free360_history from anon, authenticated;
+grant select on public.free360_snapshots, public.free360_events, public.free360_history to authenticated;
 
 create or replace function public.free360_is_member(p_circle_id uuid)
 returns boolean language sql stable security definer set search_path = '' as $$
@@ -69,6 +84,9 @@ create policy free360_snapshots_read on public.free360_snapshots for select to a
   using (public.free360_is_member(circle_id));
 drop policy if exists free360_events_read on public.free360_events;
 create policy free360_events_read on public.free360_events for select to authenticated
+  using (public.free360_is_member(circle_id));
+drop policy if exists free360_history_read on public.free360_history;
+create policy free360_history_read on public.free360_history for select to authenticated
   using (public.free360_is_member(circle_id));
 
 -- Run SELECT public.free360_new_setup_code() in the SQL editor after this script.
@@ -162,7 +180,7 @@ returns boolean language sql immutable set search_path = '' as $$
     and jsonb_typeof(p_envelope->'nonce') = 'string'
     and jsonb_typeof(p_envelope->'ciphertext') = 'string'
     and length(p_envelope->>'nonce') between 20 and 100
-    and length(p_envelope->>'ciphertext') between 1 and 8192
+    and length(p_envelope->>'ciphertext') between 24 and 8192
     and octet_length(p_envelope::text) <= 12000;
 $$;
 
@@ -196,13 +214,30 @@ begin
 end;
 $$;
 
+create or replace function public.free360_publish_history(p_envelope jsonb)
+returns void language plpgsql security definer set search_path = '' as $$
+declare v_user uuid := auth.uid(); v_circle uuid;
+begin
+  select circle_id into v_circle from public.free360_members where user_id = v_user;
+  if v_circle is null then raise exception 'This device is not a circle member'; end if;
+  if not public.free360_valid_envelope(p_envelope) then raise exception 'Invalid encrypted envelope'; end if;
+  insert into public.free360_history(circle_id, device_id, envelope) values (v_circle, v_user, p_envelope);
+  delete from public.free360_history where circle_id = v_circle and received_at < now() - interval '24 hours';
+  delete from public.free360_history where id in (
+    select id from public.free360_history where circle_id = v_circle and device_id = v_user
+    order by id desc offset 2000
+  );
+end;
+$$;
+
 revoke all on function public.free360_new_setup_code(), public.free360_is_member(uuid), public.free360_create_circle(uuid, text),
   public.free360_create_invite(uuid, text), public.free360_claim_invite(uuid, text, uuid),
   public.free360_valid_envelope(jsonb), public.free360_publish_snapshot(jsonb),
-  public.free360_publish_event(jsonb) from public, anon;
+  public.free360_publish_event(jsonb), public.free360_publish_history(jsonb) from public, anon, authenticated;
 grant execute on function public.free360_is_member(uuid), public.free360_create_circle(uuid, text),
   public.free360_create_invite(uuid, text), public.free360_claim_invite(uuid, text, uuid),
-  public.free360_publish_snapshot(jsonb), public.free360_publish_event(jsonb) to authenticated;
+  public.free360_publish_snapshot(jsonb), public.free360_publish_event(jsonb),
+  public.free360_publish_history(jsonb) to authenticated;
 
 -- Postgres Changes needs these tables in the project's Realtime publication.
 do $$

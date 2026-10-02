@@ -6,6 +6,7 @@ services:
       PORT: "8080"
       DATA_PATH: /data/free360.sqlite
       FREE360_SETUP_CODE: ${FREE360_SETUP_CODE:-}
+      EXPO_ACCESS_TOKEN: ${EXPO_ACCESS_TOKEN:-}
     ports:
       - "127.0.0.1:8080:8080"
     volumes:

@@ -23,7 +23,7 @@ function equalSecret(value, stored) {
 function validEnvelope(value) {
   return value && typeof value === 'object' && !Array.isArray(value) && value.version === 1 &&
     typeof value.nonce === 'string' && value.nonce.length >= 20 && value.nonce.length <= 100 &&
-    typeof value.ciphertext === 'string' && value.ciphertext.length >= 1 && value.ciphertext.length <= 8192 &&
+    typeof value.ciphertext === 'string' && value.ciphertext.length >= 24 && value.ciphertext.length <= 8192 &&
     Buffer.byteLength(JSON.stringify(value)) <= 12000;
 }
 function transaction(db, work) {
@@ -63,6 +63,8 @@ export function createFree360Server({ databasePath, setupCode }) {
     PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS setup (id INTEGER PRIMARY KEY CHECK (id = 1), secret_hash TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS push_tokens (user_id TEXT PRIMARY KEY REFERENCES sessions(id), token TEXT NOT NULL UNIQUE);
+    CREATE TABLE IF NOT EXISTS push_limits (user_id TEXT PRIMARY KEY REFERENCES sessions(id), sent_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS circles (id TEXT PRIMARY KEY, singleton INTEGER NOT NULL UNIQUE DEFAULT 1 CHECK (singleton = 1), owner_id TEXT NOT NULL REFERENCES sessions(id), revision INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS members (user_id TEXT PRIMARY KEY REFERENCES sessions(id), circle_id TEXT NOT NULL REFERENCES circles(id), joined_at INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS members_circle_idx ON members(circle_id);
@@ -70,6 +72,9 @@ export function createFree360Server({ databasePath, setupCode }) {
     CREATE TABLE IF NOT EXISTS snapshots (circle_id TEXT NOT NULL REFERENCES circles(id), device_id TEXT NOT NULL REFERENCES sessions(id), envelope TEXT NOT NULL, revision INTEGER NOT NULL, received_at INTEGER NOT NULL, PRIMARY KEY (circle_id, device_id));
     CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, circle_id TEXT NOT NULL REFERENCES circles(id), device_id TEXT NOT NULL REFERENCES sessions(id), envelope TEXT NOT NULL, revision INTEGER NOT NULL, received_at INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS events_recent_idx ON events(circle_id, revision DESC);
+    CREATE TABLE IF NOT EXISTS history (id INTEGER PRIMARY KEY AUTOINCREMENT, circle_id TEXT NOT NULL REFERENCES circles(id), device_id TEXT NOT NULL REFERENCES sessions(id), envelope TEXT NOT NULL, revision INTEGER NOT NULL, received_at INTEGER NOT NULL);
+    CREATE INDEX IF NOT EXISTS history_recent_idx ON history(circle_id, received_at);
+    CREATE INDEX IF NOT EXISTS history_device_idx ON history(circle_id, device_id, id DESC);
   `);
   if (!db.prepare('SELECT id FROM circles LIMIT 1').get() && !db.prepare('SELECT id FROM setup WHERE id = 1').get()) {
     if (typeof setupCode !== 'string' || !/^[a-f0-9]{64}$/.test(setupCode)) throw new Error('FREE360_SETUP_CODE must be 64 lowercase hexadecimal characters on first start. Generate it with openssl rand -hex 32.');
@@ -123,6 +128,35 @@ export function createFree360Server({ databasePath, setupCode }) {
       }
 
       const userId = authenticatedUser(req);
+      if (req.method === 'POST' && url.pathname === '/v1/push-token') {
+        ownCircle(userId);
+        const { token } = await readJson(req);
+        if (typeof token !== 'string' || token.length > 200 || !/^(ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]+\]$/.test(token)) throw new HttpError(400, 'Invalid push token.');
+        transaction(db, () => {
+          db.prepare('DELETE FROM push_tokens WHERE token = ? AND user_id <> ?').run(token, userId);
+          db.prepare('INSERT INTO push_tokens (user_id, token) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET token = excluded.token').run(userId, token);
+        });
+        send(res, 200, { ok: true }); return;
+      }
+      if (req.method === 'POST' && url.pathname === '/v1/notify') {
+        const circleId = ownCircle(userId);
+        const last = db.prepare('SELECT sent_at FROM push_limits WHERE user_id = ?').get(userId);
+        if (last && Date.now() - last.sent_at < 60000) { send(res, 200, { accepted: 0 }); return; }
+        db.prepare('INSERT INTO push_limits (user_id, sent_at) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET sent_at = excluded.sent_at').run(userId, Date.now());
+        const targets = db.prepare('SELECT t.token FROM push_tokens t JOIN members m ON t.user_id = m.user_id WHERE m.circle_id = ? AND m.user_id <> ?').all(circleId, userId);
+        if (!targets.length) { send(res, 200, { accepted: 0 }); return; }
+        const result = await fetch('https://exp.host/--/api/v2/push/send', {
+          method: 'POST', signal: AbortSignal.timeout(10000),
+          headers: { 'Content-Type': 'application/json', ...(process.env.EXPO_ACCESS_TOKEN ? { Authorization: `Bearer ${process.env.EXPO_ACCESS_TOKEN}` } : {}) },
+          body: JSON.stringify(targets.map(({ token }) => ({ to: token, title: 'Free360 home activity', body: 'Someone in your circle arrived at or left a saved home. Open Free360 for details.', sound: 'default', channelId: 'homes', data: { url: '/activity' } }))),
+        });
+        if (!result.ok) throw new HttpError(502, 'Push service unavailable.');
+        const response = await result.json();
+        const tickets = Array.isArray(response.data) ? response.data : [];
+        tickets.forEach((ticket, index) => { if (ticket.details?.error === 'DeviceNotRegistered') db.prepare('DELETE FROM push_tokens WHERE token = ?').run(targets[index].token); });
+        if (tickets.some(ticket => ticket.status === 'error')) throw new HttpError(502, 'One or more notifications were rejected.');
+        send(res, 200, { accepted: tickets.length }); return;
+      }
       if (req.method === 'POST' && url.pathname === '/v1/circle') {
         const body = await readJson(req);
         const circleId = requireUuid(body.circleId, 'circle ID');
@@ -185,6 +219,31 @@ export function createFree360Server({ databasePath, setupCode }) {
           }
         });
         send(res, 200, { ok: true }); return;
+      }
+      if (req.method === 'PUT' && url.pathname === '/v1/history') {
+        const body = await readJson(req);
+        if (!validEnvelope(body.envelope)) throw new HttpError(400, 'Invalid encrypted envelope.');
+        const circleId = ownCircle(userId);
+        transaction(db, () => {
+          const revision = nextRevision(circleId);
+          const now = Date.now();
+          db.prepare('INSERT INTO history (circle_id, device_id, envelope, revision, received_at) VALUES (?, ?, ?, ?, ?)').run(circleId, userId, JSON.stringify(body.envelope), revision, now);
+          db.prepare('DELETE FROM history WHERE circle_id = ? AND received_at < ?').run(circleId, now - 86400000);
+          db.prepare('DELETE FROM history WHERE circle_id = ? AND device_id = ? AND id NOT IN (SELECT id FROM history WHERE circle_id = ? AND device_id = ? ORDER BY id DESC LIMIT 2000)').run(circleId, userId, circleId, userId);
+        });
+        send(res, 200, { ok: true }); return;
+      }
+      if (req.method === 'GET' && url.pathname === '/v1/snapshots') {
+        const circleId = requireUuid(url.searchParams.get('circleId'), 'circle ID');
+        if (!membership(userId, circleId)) throw new HttpError(403, 'This device is not a circle member.');
+        const snapshots = db.prepare('SELECT device_id, envelope FROM snapshots WHERE circle_id = ?').all(circleId).map((row) => ({ device_id: row.device_id, envelope: JSON.parse(row.envelope) }));
+        send(res, 200, { snapshots }); return;
+      }
+      if (req.method === 'GET' && url.pathname === '/v1/history') {
+        const circleId = requireUuid(url.searchParams.get('circleId'), 'circle ID');
+        if (!membership(userId, circleId)) throw new HttpError(403, 'This device is not a circle member.');
+        const history = db.prepare('SELECT device_id, envelope FROM history WHERE circle_id = ? AND received_at >= ? ORDER BY id').all(circleId, Date.now() - 86400000).map((row) => ({ device_id: row.device_id, envelope: JSON.parse(row.envelope) }));
+        send(res, 200, { history }); return;
       }
       if (req.method === 'GET' && url.pathname === '/v1/updates') {
         const circleId = requireUuid(url.searchParams.get('circleId'), 'circle ID');

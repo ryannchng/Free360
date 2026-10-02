@@ -2,9 +2,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { joinCircle } from '../lib/circle';
+import { joinCircle, loadDeviceProfile, saveDeviceProfile, publishPaused } from '../lib/circle';
 
 const ink = '#16233B';
 const coral = '#FF6E61';
@@ -14,13 +14,17 @@ export default function JoinRoute() {
   const [permission, requestPermission] = useCameraPermissions();
   const [joining, setJoining] = useState(false);
   const [scanned, setScanned] = useState(false);
+  const [name, setName] = useState('');
+  const [named, setNamed] = useState(false);
 
   const claim = async (value: string) => {
     if (scanned || joining) return;
     setScanned(true);
     setJoining(true);
     try {
-      await joinCircle(value);
+      await saveDeviceProfile({ ...await loadDeviceProfile(), name: name.trim() });
+      const circle = await joinCircle(value);
+      await publishPaused(circle).catch(() => {});
       router.replace('/map');
     } catch (error) {
       Alert.alert('Could not join this circle', error instanceof Error ? error.message : 'Ask the owner to create a new invitation QR code.');
@@ -30,6 +34,7 @@ export default function JoinRoute() {
     }
   };
 
+  if (!named) return <SafeAreaView style={styles.permissionRoot}><View style={styles.permissionContent}><Text style={styles.permissionTitle}>What is your name?</Text><TextInput accessibilityLabel="Your name" value={name} onChangeText={setName} maxLength={40} placeholder="Your name" style={{ width: '100%', backgroundColor: '#FFF', borderRadius: 12, padding: 16, marginTop: 20 }} /><Pressable disabled={!name.trim()} style={styles.allow} onPress={() => setNamed(true)}><Text style={styles.allowText}>Continue to invitation scanner</Text></Pressable></View></SafeAreaView>;
   if (!permission) return <View style={styles.loading}><ActivityIndicator color={coral} /></View>;
   if (!permission.granted) return <SafeAreaView style={styles.permissionRoot}><View style={styles.permissionContent}><View style={styles.permissionIcon}><Ionicons name="camera-outline" size={33} color={coral} /></View><Text style={styles.permissionTitle}>Scan a private invitation</Text><Text style={styles.permissionText}>Free360 only uses the camera to read the invitation QR code.</Text><Pressable style={styles.allow} onPress={() => void requestPermission()}><Text style={styles.allowText}>Allow camera access</Text></Pressable><Pressable style={styles.cancel} onPress={() => router.back()}><Text style={styles.cancelText}>Not now</Text></Pressable></View></SafeAreaView>;
 

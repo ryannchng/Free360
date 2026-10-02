@@ -2,7 +2,7 @@
 
 This option runs a **standalone Free360 server** in one Docker container. It uses Node.js and a persistent SQLite database. It does not run, call, or require Supabase. The existing managed Supabase option remains available for separate app builds.
 
-The server stores random device IDs, hashes of device tokens and invitation secrets, encrypted location snapshots, and encrypted check-ins. The circle encryption key remains on members' phones and in one-time invitation QR codes. One server hosts one circle, with at most 20 devices. The server retains one latest snapshot per device and 100 recent check-ins.
+The server stores random device IDs, hashes of device tokens and invitation secrets, encrypted location snapshots, encrypted check-ins, and encrypted 24-hour location trail points. The circle encryption key remains on members' phones and in one-time invitation QR codes. One server hosts one circle, with at most 20 devices. The server retains one latest snapshot per device, 100 recent check-ins, and the last 2000 trail points per device within 24 hours. The history table is created automatically on restart, so updating an existing server only requires rebuilding the container.
 
 ## Start the server
 
@@ -42,5 +42,7 @@ On the owner's device, open **Create a private circle** and enter the setup code
 After creating the circle, remove `FREE360_SETUP_CODE` from `docker/.env` if desired and run `docker compose up -d` to recreate the container. The server needs that value only while initializing a fresh database; it stores a hash in SQLite. Do not remove the Docker volume when updating or restarting the server.
 
 ## Operations
+
+For home activity push alerts, rebuild the server and install an EAS development build with FCM/APNs credentials. Each receiving member enables notifications in **You → Your name, home and notifications**. The travelling phone must enable background location sharing and sync the circle's saved homes. Names and homes remain encrypted; push messages contain a generic home activity notice and open the Activity screen for details. The server needs outbound HTTPS access to `exp.host`. If Expo push security is enabled, set `EXPO_ACCESS_TOKEN` in `docker/.env`; Compose passes it to the server. The server sends at most one push per minute per sender and never sends to the sender's own token.
 
 Run `docker compose logs free360` to inspect server errors. Apply updates by pulling the repository changes and running `docker compose up -d --build`. Back up the Docker volume and the owner device: a server backup alone cannot recover a lost circle encryption key or owner device session. If the owner loses app data, existing members can still share, but no new invitations can be issued; set up a new server and circle. The API is designed to sit behind HTTPS. Keep the host, Docker, and TLS proxy updated.

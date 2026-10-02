@@ -1,6 +1,7 @@
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { loadCircle, publishLocation } from './circle';
+import { flushHomeAlerts } from './home-alerts';
 
 export const BACKGROUND_LOCATION_TASK = 'free360-background-location';
 
@@ -27,4 +28,5 @@ export async function publishStoredLocation(location: Location.LocationObject) {
     longitude: location.coords.longitude,
     accuracy: location.coords.accuracy,
   }, new Date(location.timestamp).toISOString());
+  await flushHomeAlerts();
 }

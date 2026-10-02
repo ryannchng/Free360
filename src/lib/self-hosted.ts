@@ -1,4 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
+import { secureStorage as SecureStore } from './secure-storage';
 import { getBackendUrl } from './backend';
 import type { CircleConfig, EncryptedEnvelope } from './circle';
 
@@ -30,7 +30,10 @@ async function getSession(): Promise<Session> {
   if (raw) {
     try {
       const saved: Session = JSON.parse(raw);
-      if (saved.serverUrl === getBackendUrl() && saved.deviceId && saved.token) return saved;
+      if (saved.serverUrl === getBackendUrl() && saved.deviceId && saved.token) {
+        await SecureStore.setItemAsync(SESSION_STORAGE_KEY, raw);
+        return saved;
+      }
     } catch { /* Create a fresh device session below. */ }
   }
   if (!creatingSession) {
@@ -49,6 +52,8 @@ async function authed<T>(path: string, method?: string, body?: unknown) {
   const session = await getSession();
   return request<T>(path, { method, body, token: session.token });
 }
+
+export const selfHostedRequest = authed;
 
 export async function ensureSelfHostedSession() {
   return (await getSession()).deviceId;
@@ -73,8 +78,19 @@ export async function isSelfHostedMember(circleId: string) {
   return result.member;
 }
 
-export async function publishSelfHostedEnvelope(envelope: EncryptedEnvelope, type: 'snapshot' | 'event') {
-  await authed(type === 'snapshot' ? '/v1/snapshot' : '/v1/events', type === 'snapshot' ? 'PUT' : 'POST', { envelope });
+export async function publishSelfHostedEnvelope(envelope: EncryptedEnvelope, type: 'snapshot' | 'event' | 'history') {
+  if (type === 'event') await authed('/v1/events', 'POST', { envelope });
+  else await authed(type === 'snapshot' ? '/v1/snapshot' : '/v1/history', 'PUT', { envelope });
+}
+
+export async function fetchSelfHostedSnapshots(circleId: string): Promise<EncryptedRow[]> {
+  const result = await authed<{ snapshots: EncryptedRow[] }>(`/v1/snapshots?circleId=${encodeURIComponent(circleId)}`);
+  return result.snapshots;
+}
+
+export async function fetchSelfHostedHistory(circleId: string): Promise<EncryptedRow[]> {
+  const result = await authed<{ history: EncryptedRow[] }>(`/v1/history?circleId=${encodeURIComponent(circleId)}`);
+  return result.history;
 }
 
 export function subscribeSelfHosted(config: CircleConfig, onRows: (rows: EncryptedRow[]) => void, onConnectionChange: (connected: boolean) => void, onConnected: () => void) {

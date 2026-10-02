@@ -1,10 +1,11 @@
 import * as Crypto from 'expo-crypto';
-import * as SecureStore from 'expo-secure-store';
+import { secureStorage as SecureStore } from './secure-storage';
 import { fromByteArray, toByteArray } from 'base64-js';
 import nacl from 'tweetnacl';
 import { getBackendUrl, isSelfHosted } from './backend';
-import { claimSelfHostedInvite, createSelfHostedCircle, createSelfHostedInvite, ensureSelfHostedSession, isSelfHostedMember, publishSelfHostedEnvelope, subscribeSelfHosted } from './self-hosted';
+import { claimSelfHostedInvite, createSelfHostedCircle, createSelfHostedInvite, ensureSelfHostedSession, fetchSelfHostedHistory, fetchSelfHostedSnapshots, isSelfHostedMember, publishSelfHostedEnvelope, subscribeSelfHosted } from './self-hosted';
 import { ensureDeviceSession, getSupabase } from './supabase';
+import * as Battery from 'expo-battery';
 
 const CIRCLE_STORAGE_KEY = 'free360.circle.v2';
 const PENDING_SNAPSHOT_KEY = 'free360.pending-snapshot.v2';
@@ -39,8 +40,10 @@ export type EncryptedEnvelope = {
   ciphertext: string;
 };
 
-export type SharedLocation = { type: 'location'; latitude: number; longitude: number; accuracy: number | null; recordedAt: string };
-export type SharingPaused = { type: 'paused'; recordedAt: string };
+export type Home = { latitude: number; longitude: number; radius: number };
+export type DeviceProfile = { name: string; home: Home | null; battery: number | null };
+export type SharedLocation = { type: 'location'; latitude: number; longitude: number; accuracy: number | null; recordedAt: string; profile?: DeviceProfile };
+export type SharingPaused = { type: 'paused'; recordedAt: string; profile?: DeviceProfile };
 export type CheckIn = { type: 'checkin'; id: string; message: string; recordedAt: string };
 export type CircleSnapshot = SharedLocation | SharingPaused;
 export type CirclePayload = CircleSnapshot | CheckIn;
@@ -48,6 +51,12 @@ export type CircleSubscription = { close: () => void };
 export type CircleUpdate =
   | { kind: 'snapshot'; deviceId: string; payload: CircleSnapshot }
   | { kind: 'checkin'; deviceId: string; payload: CheckIn };
+export type HistoryPoint = { latitude: number; longitude: number; recordedAt: string };
+
+export const LOCATION_HISTORY_RETENTION_MS = 24 * 60 * 60 * 1000;
+const HISTORY_MIN_INTERVAL_MS = 5 * 60 * 1000;
+const HISTORY_MIN_MOVE_METERS = 25;
+const HISTORY_JUMP_METERS = 1000;
 
 function randomBytes(length: number) {
   return Crypto.getRandomValues(new Uint8Array(length));
@@ -105,12 +114,13 @@ export function decryptCirclePayload(envelope: EncryptedEnvelope, encryptionKey:
     if (!opened) return null;
     const parsed: unknown = JSON.parse(textDecoder.decode(opened));
     if (!isRecord(parsed) || typeof parsed.recordedAt !== 'string' || !Number.isFinite(Date.parse(parsed.recordedAt))) return null;
-    if (parsed.type === 'paused') return { type: 'paused', recordedAt: parsed.recordedAt };
+    const profile = parseProfile(parsed.profile);
+    if (parsed.type === 'paused') return { type: 'paused', recordedAt: parsed.recordedAt, profile };
     if (parsed.type === 'checkin' && typeof parsed.id === 'string' && typeof parsed.message === 'string' && parsed.message.length <= 500) {
       return { type: 'checkin', id: parsed.id, message: parsed.message, recordedAt: parsed.recordedAt };
     }
     if (parsed.type !== 'location' || typeof parsed.latitude !== 'number' || !Number.isFinite(parsed.latitude) || Math.abs(parsed.latitude) > 90 || typeof parsed.longitude !== 'number' || !Number.isFinite(parsed.longitude) || Math.abs(parsed.longitude) > 180) return null;
-    return { type: 'location', latitude: parsed.latitude, longitude: parsed.longitude, accuracy: typeof parsed.accuracy === 'number' ? parsed.accuracy : null, recordedAt: parsed.recordedAt };
+    return { type: 'location', latitude: parsed.latitude, longitude: parsed.longitude, accuracy: typeof parsed.accuracy === 'number' ? parsed.accuracy : null, recordedAt: parsed.recordedAt, profile };
   } catch {
     return null;
   }
@@ -239,11 +249,12 @@ function serializeSnapshot<T>(operation: () => Promise<T>): Promise<T> {
   return result;
 }
 
-async function sendEnvelope(config: CircleConfig, envelope: EncryptedEnvelope, type: 'snapshot' | 'event') {
+async function sendEnvelope(config: CircleConfig, envelope: EncryptedEnvelope, type: 'snapshot' | 'event' | 'history') {
   await ensureMatchingSession(config);
   if (isSelfHosted()) await publishSelfHostedEnvelope(envelope, type);
   else {
-    const { error } = await getSupabase().rpc(type === 'snapshot' ? 'free360_publish_snapshot' : 'free360_publish_event', { p_envelope: envelope });
+    const rpc = type === 'snapshot' ? 'free360_publish_snapshot' : type === 'event' ? 'free360_publish_event' : 'free360_publish_history';
+    const { error } = await getSupabase().rpc(rpc, { p_envelope: envelope });
     if (error) throw error;
   }
 }
@@ -265,26 +276,145 @@ export function flushPendingSnapshot(config: CircleConfig) {
   return serializeSnapshot(() => flushPendingSnapshotInner(config));
 }
 
+async function publishSnapshotInner(config: CircleConfig, snapshot: CircleSnapshot) {
+  const profile = await loadDeviceProfile();
+  const level = await Battery.getBatteryLevelAsync().catch(() => -1);
+  profile.battery = level >= 0 ? Math.round(level * 100) : null;
+  const payload: CircleSnapshot = { ...snapshot, profile };
+  await SecureStore.setItemAsync('free360.last-snapshot.v1', JSON.stringify(payload));
+  const pending: PendingSnapshot = { circleId: config.circleId, deviceId: config.deviceId, id: randomId(), envelope: encryptCirclePayload(payload, config.encryptionKey) };
+  await SecureStore.setItemAsync(PENDING_SNAPSHOT_KEY, JSON.stringify(pending));
+  await flushPendingSnapshotInner(config);
+}
+
 export function publishSnapshot(config: CircleConfig, payload: CircleSnapshot) {
-  return serializeSnapshot(async () => {
-    const pending: PendingSnapshot = { circleId: config.circleId, deviceId: config.deviceId, id: randomId(), envelope: encryptCirclePayload(payload, config.encryptionKey) };
-    await SecureStore.setItemAsync(PENDING_SNAPSHOT_KEY, JSON.stringify(pending));
-    await flushPendingSnapshotInner(config);
-  });
+  return serializeSnapshot(() => publishSnapshotInner(config, payload));
+}
+
+function parseProfile(value: unknown): DeviceProfile | undefined {
+  if (!isRecord(value) || typeof value.name !== 'string' || !value.name.trim() || value.name.length > 40) return undefined;
+  let home: Home | null = null;
+  if (isRecord(value.home)) {
+    const { latitude, longitude, radius } = value.home;
+    if (typeof latitude === 'number' && Number.isFinite(latitude) && Math.abs(latitude) <= 90 && typeof longitude === 'number' && Number.isFinite(longitude) && Math.abs(longitude) <= 180 && typeof radius === 'number' && Number.isFinite(radius) && radius >= 100 && radius <= 1000) home = { latitude, longitude, radius };
+  }
+  const battery = typeof value.battery === 'number' && Number.isFinite(value.battery) && value.battery >= 0 && value.battery <= 100 ? Math.round(value.battery) : null;
+  return { name: value.name.trim(), home, battery };
+}
+
+export async function loadDeviceProfile(): Promise<DeviceProfile> {
+  const raw = await SecureStore.getItemAsync('free360.profile.v1');
+  try { return parseProfile(raw ? JSON.parse(raw) : null) ?? { name: 'This device', home: null, battery: null }; }
+  catch { return { name: 'This device', home: null, battery: null }; }
+}
+
+export async function saveDeviceProfile(profile: DeviceProfile) {
+  const validated = parseProfile(profile);
+  if (!validated) throw new Error('Enter a name with 1–40 characters.');
+  await SecureStore.setItemAsync('free360.profile.v1', JSON.stringify(validated));
+  await refreshDeviceSnapshot();
+}
+
+export async function refreshDeviceSnapshot() {
+  const config = await loadCircle();
+  if (config) {
+    const raw = await SecureStore.getItemAsync('free360.last-snapshot.v1');
+    const snapshot: CircleSnapshot = raw ? JSON.parse(raw) : { type: 'paused', recordedAt: new Date().toISOString() };
+    await publishSnapshot(config, snapshot);
+  }
+}
+
+function distanceMeters(a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }) {
+  const radians = Math.PI / 180;
+  const x = (b.longitude - a.longitude) * radians * Math.cos(((a.latitude + b.latitude) / 2) * radians);
+  const y = (b.latitude - a.latitude) * radians;
+  return Math.hypot(x, y) * 6371000;
+}
+
+// Appends a trail point when the device has moved meaningfully: at the five-minute
+// refresh cadence after any movement, or immediately on jumps of a kilometer or more.
+// A stationary device keeps refreshing its snapshot without adding duplicate points.
+let lastHistoryPoint: { recordedAt: number; latitude: number; longitude: number } | null = null;
+
+function shouldStoreHistoryPoint(location: { latitude: number; longitude: number }, recordedAt: string) {
+  const last = lastHistoryPoint;
+  const moved = last ? distanceMeters(last, location) : Infinity;
+  const elapsed = last ? Date.parse(recordedAt) - last.recordedAt : Infinity;
+  if (!last || (elapsed >= HISTORY_MIN_INTERVAL_MS && moved >= HISTORY_MIN_MOVE_METERS) || moved >= HISTORY_JUMP_METERS) {
+    lastHistoryPoint = { recordedAt: Date.parse(recordedAt), latitude: location.latitude, longitude: location.longitude };
+    return true;
+  }
+  return false;
 }
 
 export function publishLocation(config: CircleConfig, location: Omit<SharedLocation, 'type' | 'recordedAt'>, recordedAt = new Date().toISOString()) {
-  return publishSnapshot(config, { type: 'location', ...location, recordedAt });
+  return serializeSnapshot(async () => {
+    const payload: SharedLocation = { type: 'location', ...location, recordedAt };
+    await publishSnapshotInner(config, payload);
+    if (shouldStoreHistoryPoint(location, recordedAt)) {
+      try {
+        await sendEnvelope(config, encryptCirclePayload(payload, config.encryptionKey), 'history');
+      } catch (error) {
+        console.warn('[Free360] History point skipped:', error);
+      }
+    }
+  });
 }
 
 export function publishPaused(config: CircleConfig) {
   return publishSnapshot(config, { type: 'paused', recordedAt: new Date().toISOString() });
 }
 
-export async function publishCheckIn(config: CircleConfig, message: string): Promise<CheckIn> {
-  const payload: CheckIn = { type: 'checkin', id: randomId(), message: message.trim().slice(0, 500), recordedAt: new Date().toISOString() };
+export async function publishCheckIn(config: CircleConfig, message: string, id = randomId(), recordedAt = new Date().toISOString()): Promise<CheckIn> {
+  const payload: CheckIn = { type: 'checkin', id, message: message.trim().slice(0, 500), recordedAt };
   await sendEnvelope(config, encryptCirclePayload(payload, config.encryptionKey), 'event');
   return payload;
+}
+
+function decodePayloadRow(row: { device_id: unknown; envelope: unknown }, encryptionKey: string): { deviceId: string; payload: CirclePayload } | null {
+  if (typeof row.device_id !== 'string' || !isRecord(row.envelope)) return null;
+  const envelope = row.envelope;
+  if (envelope.version !== 1 || typeof envelope.nonce !== 'string' || typeof envelope.ciphertext !== 'string') return null;
+  const payload = decryptCirclePayload({ version: 1, nonce: envelope.nonce, ciphertext: envelope.ciphertext }, encryptionKey);
+  return payload ? { deviceId: row.device_id, payload } : null;
+}
+
+export async function fetchCircleSnapshots(config: CircleConfig): Promise<Record<string, CircleSnapshot>> {
+  const rows: { device_id: unknown; envelope: unknown }[] = isSelfHosted()
+    ? await fetchSelfHostedSnapshots(config.circleId)
+    : await (async () => {
+        const { data, error } = await getSupabase().from('free360_snapshots').select('device_id,envelope').eq('circle_id', config.circleId);
+        if (error) throw error;
+        return data ?? [];
+      })();
+  const snapshots: Record<string, CircleSnapshot> = {};
+  for (const row of rows) {
+    const decoded = decodePayloadRow(row, config.encryptionKey);
+    if (decoded && decoded.payload.type !== 'checkin') snapshots[decoded.deviceId] = decoded.payload;
+  }
+  return snapshots;
+}
+
+export async function fetchLocationHistory(config: CircleConfig): Promise<Record<string, HistoryPoint[]>> {
+  const cutoff = Date.now() - LOCATION_HISTORY_RETENTION_MS;
+  const rows: { device_id: unknown; envelope: unknown }[] = isSelfHosted()
+    ? await fetchSelfHostedHistory(config.circleId)
+    : await (async () => {
+        const { data, error } = await getSupabase().from('free360_history').select('device_id,envelope').eq('circle_id', config.circleId).gte('received_at', new Date(cutoff).toISOString()).order('received_at');
+        if (error) throw error;
+        return data ?? [];
+      })();
+  const history: Record<string, HistoryPoint[]> = {};
+  for (const row of rows) {
+    const decoded = decodePayloadRow(row, config.encryptionKey);
+    if (!decoded || decoded.payload.type !== 'location' || Date.parse(decoded.payload.recordedAt) < cutoff) continue;
+    const point: HistoryPoint = { latitude: decoded.payload.latitude, longitude: decoded.payload.longitude, recordedAt: decoded.payload.recordedAt };
+    const points = history[decoded.deviceId] ?? [];
+    points.push(point);
+    history[decoded.deviceId] = points;
+  }
+  for (const points of Object.values(history)) points.sort((a, b) => Date.parse(a.recordedAt) - Date.parse(b.recordedAt));
+  return history;
 }
 
 function receiveEncryptedUpdate(row: Record<string, unknown>, encryptionKey: string, onUpdate: (update: CircleUpdate) => void) {
@@ -342,6 +472,7 @@ export function subscribeToCircle(config: CircleConfig, onUpdate: (update: Circl
   return { close: () => { closed = true; if (channel) void getSupabase().removeChannel(channel); onConnectionChange(false); } };
 }
 
+let circleStorageMigrated = false;
 export async function loadCircle() {
   const raw = await SecureStore.getItemAsync(CIRCLE_STORAGE_KEY);
   if (!raw) return null;
@@ -364,6 +495,7 @@ export async function loadCircle() {
       if (!await recoverPendingCircle(config)) return null;
       return { ...config, pending: false };
     }
+    if (!circleStorageMigrated) { await saveCircle(config); circleStorageMigrated = true; }
     return config;
   } catch { return null; }
 }
