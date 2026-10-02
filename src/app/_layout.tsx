@@ -1,14 +1,17 @@
 import { Stack, router } from 'expo-router';
 import { useEffect } from 'react';
-import * as Notifications from 'expo-notifications';
+import type { NotificationResponse } from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { getNotifications } from '../lib/notifications';
 import '../lib/background-location';
 import '../lib/home-alerts';
 
 export default function RootLayout() {
   useEffect(() => {
-    const open = (response: Notifications.NotificationResponse) => {
+    const Notifications = getNotifications();
+    if (!Notifications) return;
+    const open = (response: NotificationResponse) => {
       if (response.notification.request.content.data?.url === '/activity') router.push('/activity');
     };
     const listener = Notifications.addNotificationResponseReceivedListener(open);

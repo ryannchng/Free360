@@ -1,6 +1,6 @@
 import * as Location from 'expo-location';
-import * as Notifications from 'expo-notifications';
 import { secureStorage as SecureStore } from './secure-storage';
+import { getNotifications } from './notifications';
 import * as Crypto from 'expo-crypto';
 import * as TaskManager from 'expo-task-manager';
 import Constants from 'expo-constants';
@@ -18,10 +18,12 @@ const STATES_KEY = 'free360.home-states.v1';
 const QUEUE_KEY = 'free360.home-alert-queue.v1';
 type PendingAlert = { circleId: string; id: string; message: string; recordedAt: string; published: boolean };
 
-Notifications.setNotificationHandler({ handleNotification: async () => ({ shouldPlaySound: true, shouldSetBadge: false, shouldShowBanner: true, shouldShowList: true }) });
+getNotifications()?.setNotificationHandler({ handleNotification: async () => ({ shouldPlaySound: true, shouldSetBadge: false, shouldShowBanner: true, shouldShowList: true }) });
 
 export async function enableNotifications() {
   if (Platform.OS === 'web') throw new Error('Notifications require the mobile app.');
+  const Notifications = getNotifications();
+  if (!Notifications) throw new Error('Push notifications need a development build — they do not work in Expo Go on Android.');
   if (Platform.OS === 'android') await Notifications.setNotificationChannelAsync('homes', { name: 'Home arrivals and departures', importance: Notifications.AndroidImportance.DEFAULT });
   const permission = await Notifications.requestPermissionsAsync();
   if (!permission.granted) throw new Error('Allow notifications in your phone settings.');
