@@ -54,6 +54,7 @@ async function syncHomesInner(snapshots: Record<string, CircleSnapshot>) {
   if (profile.home) homes.push({ ...profile.home, name: profile.name, deviceId: circle.deviceId });
   const raw = JSON.stringify({ circleId: circle.circleId, homes });
   if (raw === await SecureStore.getItemAsync(HOMES_KEY)) {
+    if (!(await Location.getBackgroundPermissionsAsync()).granted) return;
     if (!await Location.hasStartedGeofencingAsync(HOME_TASK)) await refreshHomeMonitoring();
     return;
   }
@@ -64,12 +65,14 @@ async function syncHomesInner(snapshots: Record<string, CircleSnapshot>) {
 
 export async function refreshHomeMonitoring() {
   if (Platform.OS === 'web') return;
-  const sharing = await Location.hasStartedLocationUpdatesAsync('free360-background-location');
   const permission = await Location.getBackgroundPermissionsAsync();
+  // Even querying or stopping geofences requires background authorization.
+  if (!permission.granted) return;
+  const sharing = await Location.hasStartedLocationUpdatesAsync('free360-background-location');
   const raw = await SecureStore.getItemAsync(HOMES_KEY);
   const saved = raw ? JSON.parse(raw) as { circleId: string; homes: SavedHome[] } : null;
   const circle = await loadCircle();
-  if (!sharing || !permission.granted || !saved?.homes.length || saved.circleId !== circle?.circleId) {
+  if (!sharing || !saved?.homes.length || saved.circleId !== circle?.circleId) {
     if (await Location.hasStartedGeofencingAsync(HOME_TASK)) await Location.stopGeofencingAsync(HOME_TASK);
     return;
   }

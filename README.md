@@ -91,6 +91,14 @@ npx eas-cli@latest build:configure
 npx eas-cli@latest build --profile development --platform android
 ```
 
+## Map rendering
+
+Free360 renders OpenStreetMap tiles with a bundled Leaflet map in `react-native-webview` on Android and iOS, and an iframe on web. It does not use the Google Maps SDK or require a Google Maps API key. Member avatars, homes, marker taps, recentering, and location trails use this map.
+
+Existing development builds need to be rebuilt after installing the WebView native module (`npm run android` locally, or a new EAS development build). Expo Go already includes WebView. Only tiles require network access; Leaflet's JavaScript and CSS are bundled with the app. Tiles follow the [OpenStreetMap tile usage policy](https://operations.osmfoundation.org/policies/tiles/), including visible attribution and normal HTTP caching.
+
+After changing the Leaflet version, run `npm run bundle:leaflet` to regenerate its bundled JavaScript, CSS, and license.
+
 ## Verify the code
 
 ```bash

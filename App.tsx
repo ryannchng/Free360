@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
+  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -16,9 +17,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import MapView, { Marker, Polyline, UrlTile } from 'react-native-maps';
 import { MemberAvatar } from './src/components/MemberAvatar';
-import { MapAvatarMarker } from './src/components/MapAvatarMarker';
+import { OpenStreetMap, type OpenStreetMapHandle, type MapMember } from './src/components/OpenStreetMap';
 import { avatarForProfile, displayNameFor, initialsForName } from './src/lib/member-display';
 import { isValidCoordinate, regionForCenter, resolveMapCenter } from './src/lib/map-region';
 import { BACKGROUND_LOCATION_TASK } from './src/lib/background-location';
@@ -130,7 +130,7 @@ function Header({ circleName, selfMember, onSettings }: { circleName: string; se
 }
 
 function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembers, circleConnected, selfHome, trailMember, trailCoordinates, onRequestLocation, onCheckIn, onOpenMember, onOpenCircle, onOpenSettings, onInvite, onCreateCircle, onJoinCircle, onHideTrail, isOwner }: { currentCoordinate: { latitude: number; longitude: number } | null; locationEnabled: boolean; circleName: string; circleMembers: Member[]; circleConnected: boolean; selfHome: Home | null; trailMember: Member | null; trailCoordinates: { latitude: number; longitude: number }[]; onRequestLocation: () => void; onCheckIn: () => void; onOpenMember: (member: Member) => void; onOpenCircle: () => void; onOpenSettings: () => void; onInvite: () => void; onCreateCircle: () => void; onJoinCircle: () => void; onHideTrail: () => void; isOwner: boolean }) {
-  const mapRef = useRef<MapView>(null);
+  const mapRef = useRef<OpenStreetMapHandle>(null);
   // Derive the visible center purely from already-available values: live device
   // location (only when sharing), then the first valid shared member location,
   // then a saved home, else a broad fallback. Never requests location here.
@@ -140,43 +140,27 @@ function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembe
   const displayCenter = resolved.center;
   const displaySource = resolved.source;
   const displayRegion = regionForCenter(displayCenter, displaySource);
-  // Stable initial region so MapView always mounts (fallback first, then animate
-  // to real locations as they arrive via snapshots/profile load).
-  const initialRegionRef = useRef(displayRegion);
   const hasRealLocation = displaySource !== 'fallback';
 
-  useEffect(() => {
-    if (trailMember) return;
-    mapRef.current?.animateToRegion(displayRegion, 500);
-  }, [displayCenter.latitude, displayCenter.longitude, displaySource, trailMember]);
-
-  useEffect(() => {
-    if (trailCoordinates.length > 1) mapRef.current?.fitToCoordinates(trailCoordinates, { edgePadding: { top: 140, right: 80, bottom: 330, left: 80 }, animated: true });
-  }, [trailCoordinates]);
-
   const recenter = () => {
-    mapRef.current?.animateToRegion(displayRegion, 450);
+    mapRef.current?.animateToRegion(displayRegion);
   };
 
   const actionLabel = !circleName ? 'Create circle' : isOwner ? 'Invite someone' : locationEnabled ? 'Your circle' : 'Share location';
   const actionIcon: IconName = !circleName ? 'add' : isOwner ? 'person-add-outline' : locationEnabled ? 'people-outline' : 'location-outline';
   const action = !circleName ? onCreateCircle : isOwner ? onInvite : locationEnabled ? onOpenCircle : onRequestLocation;
   const validTrail = trailCoordinates.filter(isValidCoordinate);
+  const mapMembers: MapMember[] = circleMembers.filter(member => !member.isPaused).flatMap(member => {
+    const coordinate = member.isYou ? currentCoordinate : member.coordinate;
+    if (!isValidCoordinate(coordinate)) return [];
+    const movement = movementDisplay(member);
+    const activity = { pause: '⏸', walk: '🚶', bicycle: '🚲', car: '🚗' }[movement.icon as string] ?? '?';
+    return [{ id: member.id, coordinate, name: member.name, initials: member.initials, avatar: member.avatar ?? null, color: member.color, stale: !!member.isStale, battery: member.battery, movement: `${activity} ${movement.estimated ? '~' : ''}${movement.speed}`, description: `${movement.label} · ${movement.speed}` }];
+  });
 
   return (
     <View style={styles.mapScreen}>
-      <MapView ref={mapRef} style={StyleSheet.absoluteFill} initialRegion={initialRegionRef.current} mapType={Platform.OS === 'android' ? 'none' : 'standard'} showsCompass={false} showsBuildings={false} showsPointsOfInterests={false} showsUserLocation={false} toolbarEnabled={false}>
-        <UrlTile urlTemplate="https://tile.openstreetmap.org/{z}/{x}/{y}.png" maximumZ={19} flipY={false} />
-        {circleMembers.filter(member => member.home && isValidCoordinate(member.home)).map(member => <Marker key={`home:${member.id}`} coordinate={member.home!} title={`${member.name}'s home`} pinColor={COLORS.mint} />)}
-        {circleMembers.filter((member) => !member.isPaused).map((member) => {
-          const coordinate = member.isYou ? currentCoordinate : member.coordinate;
-          if (!isValidCoordinate(coordinate)) return null;
-          const movement = movementDisplay(member);
-          return <MapAvatarMarker key={`${member.id}:${member.initials}:${member.color}:${member.isStale ? 'stale' : 'live'}:${member.battery ?? 'nb'}:${movement.icon}:${movement.speed}:${movement.estimated}:${typeof member.avatar === 'string' ? member.avatar.length : 'noav'}`} markerKey={`${member.id}`} coordinate={coordinate} name={member.name} initials={member.initials} avatar={member.avatar ?? null} color={member.color} stale={member.isStale} battery={member.battery} title={member.name} description={`${movement.label} · ${movement.speed}`} accessibilityLabel={`${member.name}, ${movement.label}, ${movement.speed}`} movementBadge={{ icon: movement.icon, speed: `${movement.estimated ? '~' : ''}${movement.speed}` }} onPress={() => onOpenMember(member)} />;
-        })}
-        {validTrail.length > 1 && <Polyline coordinates={validTrail} strokeColor={trailMember?.color ?? COLORS.purple} strokeWidth={4} />}
-        {validTrail.length > 1 && isValidCoordinate(validTrail[0]) && <Marker coordinate={validTrail[0]} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={false}><View style={[styles.trailStartDot, { backgroundColor: trailMember?.color ?? COLORS.purple }]} /></Marker>}
-      </MapView>
+      <OpenStreetMap ref={mapRef} region={displayRegion} data={{ members: mapMembers, homes: circleMembers.filter(member => isValidCoordinate(member.home)).map(member => ({ coordinate: member.home!, name: member.name })), trail: validTrail, trailColor: trailMember?.color ?? COLORS.purple }} onOpenMember={id => { const member = circleMembers.find(member => member.id === id); if (member) onOpenMember(member); }} />
       {!hasRealLocation && <View style={styles.mapEmptyOverlay} pointerEvents="none"><Icon name={circleName ? 'location-outline' : 'people-outline'} size={16} color={COLORS.deepPurple} /><Text style={styles.mapEmptyOverlayText}>{circleName ? 'No shared locations yet — map stays visible' : 'Start a private circle to see locations'}</Text></View>}
 
       <View style={styles.mapTopBar}>
@@ -191,7 +175,7 @@ function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembe
         {trailMember && <Pressable style={styles.trailPill} onPress={onHideTrail} accessibilityLabel="Hide 24-hour trail"><Icon name="footsteps" size={15} color={COLORS.white} /><Text style={styles.trailPillText} numberOfLines={1}>{trailMember.name} · 24-hour trail</Text><Icon name="close" size={14} color={COLORS.white} /></Pressable>}
       </View>
 
-      <><View style={styles.mapControls}><Pressable style={styles.mapControlButton} onPress={recenter} accessibilityLabel="Center map on a shared location" hitSlop={6}><Icon name="locate" size={24} color={COLORS.purple} /></Pressable></View><View style={styles.mapAttribution}><Text style={styles.attributionText}>{'\u00A9 OpenStreetMap contributors'}</Text></View></>
+      <View style={styles.mapControls}><Pressable style={styles.mapControlButton} onPress={recenter} accessibilityLabel="Center map on a shared location" hitSlop={6}><Icon name="locate" size={24} color={COLORS.purple} /></Pressable></View>
 
       <View style={styles.mapActions}>
         <Pressable style={styles.mapActionButton} onPress={circleName ? onCheckIn : onJoinCircle}><Icon name={circleName ? 'checkmark-circle' : 'qr-code-outline'} size={21} color={COLORS.purple} /><Text style={styles.mapActionText}>{circleName ? 'Check in' : 'Join with QR'}</Text></Pressable>
@@ -525,7 +509,16 @@ export default function App() {
 
       let backgroundStarted = false;
       try {
-        const background = await Location.requestBackgroundPermissionsAsync();
+        let background = await Location.getBackgroundPermissionsAsync();
+        if (!background.granted) {
+          const proceed = Platform.OS !== 'android' || await new Promise<boolean>(resolve => {
+            Alert.alert('Allow background location', 'Free360 needs background location to share with your circle and detect home arrivals while the app is closed. On the next screen, choose Allow all the time for Free360.', [
+              { text: 'While open only', style: 'cancel', onPress: () => resolve(false) },
+              { text: 'Continue', onPress: () => resolve(true) },
+            ], { cancelable: true, onDismiss: () => resolve(false) });
+          });
+          if (proceed) background = await Location.requestBackgroundPermissionsAsync();
+        }
         if (background.status === 'granted') {
           if (!await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK)) await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, { accuracy: Location.Accuracy.High, distanceInterval: 0, timeInterval: 30000, pausesUpdatesAutomatically: false, showsBackgroundLocationIndicator: true, foregroundService: { notificationTitle: 'Free360 location sharing', notificationBody: 'Your circle can see your location.', notificationColor: COLORS.coral } });
           backgroundStarted = true;
@@ -537,7 +530,7 @@ export default function App() {
         setBackgroundReady(false);
       }
       setLocationEnabled(true);
-      setToast(backgroundStarted ? 'Location sharing is on, including background updates.' : 'Sharing while open. Background sharing needs permission and a development build.');
+      setToast(backgroundStarted ? 'Location sharing is on, including background updates.' : 'Sharing while open. Enable Allow all the time in Free360 location settings for background updates.');
     } catch {
       setToast('We couldn’t access your location. Check device permissions.');
     }
