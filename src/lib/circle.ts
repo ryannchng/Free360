@@ -9,6 +9,7 @@ import { ensureDeviceSession, getSupabase } from './supabase';
 import { normalizeSetupCode } from './setup-code';
 import { isCreateCircleSuccess, resolveCreateCircleFailureMessage } from './create-circle-result';
 import * as Battery from 'expo-battery';
+import { parseMovement, type Movement } from './movement';
 
 const CIRCLE_STORAGE_KEY = 'free360.circle.v2';
 const PENDING_SNAPSHOT_KEY = 'free360.pending-snapshot.v2';
@@ -45,7 +46,7 @@ export type EncryptedEnvelope = {
 
 export type Home = { latitude: number; longitude: number; radius: number };
 export type DeviceProfile = { name: string; home: Home | null; battery: number | null };
-export type SharedLocation = { type: 'location'; latitude: number; longitude: number; accuracy: number | null; recordedAt: string; profile?: DeviceProfile };
+export type SharedLocation = { type: 'location'; latitude: number; longitude: number; accuracy: number | null; recordedAt: string; profile?: DeviceProfile } & Partial<Movement>;
 export type SharingPaused = { type: 'paused'; recordedAt: string; profile?: DeviceProfile };
 export type CheckIn = { type: 'checkin'; id: string; message: string; recordedAt: string };
 export type CircleSnapshot = SharedLocation | SharingPaused;
@@ -123,7 +124,7 @@ export function decryptCirclePayload(envelope: EncryptedEnvelope, encryptionKey:
       return { type: 'checkin', id: parsed.id, message: parsed.message, recordedAt: parsed.recordedAt };
     }
     if (parsed.type !== 'location' || typeof parsed.latitude !== 'number' || !Number.isFinite(parsed.latitude) || Math.abs(parsed.latitude) > 90 || typeof parsed.longitude !== 'number' || !Number.isFinite(parsed.longitude) || Math.abs(parsed.longitude) > 180) return null;
-    return { type: 'location', latitude: parsed.latitude, longitude: parsed.longitude, accuracy: typeof parsed.accuracy === 'number' ? parsed.accuracy : null, recordedAt: parsed.recordedAt, profile };
+    return { type: 'location', latitude: parsed.latitude, longitude: parsed.longitude, accuracy: typeof parsed.accuracy === 'number' ? parsed.accuracy : null, recordedAt: parsed.recordedAt, profile, ...parseMovement(parsed) };
   } catch {
     return null;
   }
