@@ -9,6 +9,7 @@ import { ensureDeviceSession, getSupabase } from './supabase';
 import { normalizeSetupCode } from './setup-code';
 import { isCreateCircleSuccess, resolveCreateCircleFailureMessage } from './create-circle-result';
 import * as Battery from 'expo-battery';
+import { normalizeAvatar } from './avatar-format';
 
 const CIRCLE_STORAGE_KEY = 'free360.circle.v2';
 const PENDING_SNAPSHOT_KEY = 'free360.pending-snapshot.v2';
@@ -44,7 +45,7 @@ export type EncryptedEnvelope = {
 };
 
 export type Home = { latitude: number; longitude: number; radius: number };
-export type DeviceProfile = { name: string; home: Home | null; battery: number | null };
+export type DeviceProfile = { name: string; home: Home | null; battery: number | null; avatar?: string | null };
 export type SharedLocation = { type: 'location'; latitude: number; longitude: number; accuracy: number | null; recordedAt: string; profile?: DeviceProfile };
 export type SharingPaused = { type: 'paused'; recordedAt: string; profile?: DeviceProfile };
 export type CheckIn = { type: 'checkin'; id: string; message: string; recordedAt: string };
@@ -348,7 +349,10 @@ function parseProfile(value: unknown): DeviceProfile | undefined {
     if (typeof latitude === 'number' && Number.isFinite(latitude) && Math.abs(latitude) <= 90 && typeof longitude === 'number' && Number.isFinite(longitude) && Math.abs(longitude) <= 180 && typeof radius === 'number' && Number.isFinite(radius) && radius >= 100 && radius <= 1000) home = { latitude, longitude, radius };
   }
   const battery = typeof value.battery === 'number' && Number.isFinite(value.battery) && value.battery >= 0 && value.battery <= 100 ? Math.round(value.battery) : null;
-  return { name: value.name.trim(), home, battery };
+  // An invalid photo strips only the avatar, never the rest of the profile,
+  // so old clients and corrupt values stay backward compatible.
+  const avatar = normalizeAvatar(value.avatar);
+  return { name: value.name.trim(), home, battery, avatar };
 }
 
 export async function loadDeviceProfile(): Promise<DeviceProfile> {
@@ -361,7 +365,14 @@ export async function saveDeviceProfile(profile: DeviceProfile) {
   const validated = parseProfile(profile);
   if (!validated) throw new Error('Enter a name with 1–40 characters.');
   await SecureStore.setItemAsync('free360.profile.v1', JSON.stringify(validated));
-  await refreshDeviceSnapshot();
+  // The local save above is durable. A queued/offline snapshot publish must
+  // not misreport it as a total failure: the pending envelope stays stored
+  // and flushes on reconnect.
+  try {
+    await refreshDeviceSnapshot();
+  } catch (error) {
+    console.warn('[Free360] Profile saved locally; snapshot queued:', error);
+  }
 }
 
 export async function refreshDeviceSnapshot() {

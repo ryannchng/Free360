@@ -36,6 +36,13 @@
           "barcodeScannerEnabled": true
         }
       ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Free360 to access your photos so you can choose a profile picture for your circle.",
+          "microphonePermission": false
+        }
+      ],
       "expo-router",
       "expo-secure-store",
       "expo-font",
