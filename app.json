@@ -24,6 +24,8 @@
         "expo-location",
         {
           "locationAlwaysAndWhenInUsePermission": "Allow Free360 to share your location with your circle while you travel.",
+          "motionUsagePermission": "Allow Free360 to show whether you are walking, biking or travelling in a vehicle to your circle.",
+          "isAndroidMotionActivityEnabled": true,
           "isIosBackgroundLocationEnabled": true,
           "isAndroidBackgroundLocationEnabled": true
         }

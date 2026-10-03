@@ -26,6 +26,8 @@ import { type CheckIn, type CircleConfig, type CircleSnapshot, fetchCircleSnapsh
 import { loadDeviceProfile, refreshDeviceSnapshot, type DeviceProfile, type Home } from './src/lib/circle';
 import { refreshHomeMonitoring, syncHomes, flushHomeAlerts } from './src/lib/home-alerts';
 import * as Battery from 'expo-battery';
+import { EMPTY_MOVEMENT, freshMovement, parseMovement, type Movement } from './src/lib/movement';
+import { locationWithMovement, resetLocationMovement, updateMotionActivity } from './src/lib/location-movement';
 
 type Tab = 'map' | 'circle' | 'activity' | 'you';
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -46,6 +48,7 @@ type Member = {
   battery?: number | null;
   home?: Home | null;
   historyCount: number;
+  movement?: Movement;
 };
 
 const COLORS = {
@@ -81,6 +84,14 @@ function ageLabel(recordedAt: string, now: number) {
 
 function Icon({ name, size = 21, color = COLORS.ink }: { name: IconName; size?: number; color?: string }) {
   return <Ionicons name={name} size={size} color={color} />;
+}
+
+function movementDisplay(member: Member) {
+  const movement = member.movement ?? EMPTY_MOVEMENT;
+  const icons: Record<NonNullable<Movement['activity']>, IconName> = { stationary: 'pause', walking: 'walk', running: 'walk', biking: 'bicycle', driving: 'car' };
+  const labels = { stationary: 'Still', walking: 'Walking', running: 'Running', biking: 'Biking', driving: 'In a vehicle' };
+  const label = movement.activity ? `${labels[movement.activity]}${movement.activitySource === 'speed' ? ' (estimated)' : ''}` : 'Activity unavailable';
+  return { icon: movement.activity ? icons[movement.activity] : 'help-circle-outline' as IconName, label, speed: movement.speed === null ? '— km/h' : `${Math.round(movement.speed * 3.6)} km/h`, estimated: movement.activitySource === 'speed' };
 }
 
 function MemberRowAvatar({ member, size = 48 }: { member: Member; size?: number }) {
@@ -160,7 +171,8 @@ function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembe
         {circleMembers.filter((member) => !member.isPaused).map((member) => {
           const coordinate = member.isYou ? currentCoordinate : member.coordinate;
           if (!isValidCoordinate(coordinate)) return null;
-          return <MapAvatarMarker key={`${member.id}:${member.isStale ? 'stale' : 'live'}:${member.battery ?? 'nb'}:${typeof member.avatar === 'string' ? member.avatar.length : 'noav'}`} markerKey={`${member.id}`} coordinate={coordinate} name={member.name} initials={member.initials} avatar={member.avatar ?? null} color={member.color} stale={member.isStale} battery={member.battery} onPress={() => onOpenMember(member)} />;
+          const movement = movementDisplay(member);
+          return <MapAvatarMarker key={`${member.id}:${member.initials}:${member.color}:${member.isStale ? 'stale' : 'live'}:${member.battery ?? 'nb'}:${movement.icon}:${movement.speed}:${movement.estimated}:${typeof member.avatar === 'string' ? member.avatar.length : 'noav'}`} markerKey={`${member.id}`} coordinate={coordinate} name={member.name} initials={member.initials} avatar={member.avatar ?? null} color={member.color} stale={member.isStale} battery={member.battery} title={member.name} description={`${movement.label} · ${movement.speed}`} accessibilityLabel={`${member.name}, ${movement.label}, ${movement.speed}`} movementBadge={{ icon: movement.icon, speed: `${movement.estimated ? '~' : ''}${movement.speed}` }} onPress={() => onOpenMember(member)} />;
         })}
         {validTrail.length > 1 && <Polyline coordinates={validTrail} strokeColor={trailMember?.color ?? COLORS.purple} strokeWidth={4} />}
         {validTrail.length > 1 && isValidCoordinate(validTrail[0]) && <Marker coordinate={validTrail[0]} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={false}><View style={[styles.trailStartDot, { backgroundColor: trailMember?.color ?? COLORS.purple }]} /></Marker>}
@@ -268,7 +280,7 @@ function CheckInModal({ visible, onClose, onConfirm }: { visible: boolean; onClo
 
 function MemberModal({ member, onClose, onShowTrail }: { member: Member | null; onClose: () => void; onShowTrail: (member: Member) => void }) {
   if (!member) return null;
-  return <Modal visible={Boolean(member)} transparent animationType="slide" onRequestClose={onClose}><View style={styles.modalBackdrop}><Pressable style={styles.modalDismissArea} onPress={onClose} /><View style={styles.memberSheet}><View style={styles.sheetHandle} /><View style={styles.memberSheetHeader}><MemberAvatar name={member.name} initials={member.initials} avatar={member.avatar ?? null} color={member.color} size={60} /><View style={styles.memberSheetCopy}><Text style={styles.sheetTitle}>{member.name}</Text><Text style={styles.memberSheetRole}>{member.role} · {member.status}</Text></View><Pressable onPress={onClose} hitSlop={8}><Icon name="close" size={22} color={COLORS.muted} /></Pressable></View><View style={styles.memberDetailGrid}><DetailStat icon="location" label="Sharing" value={member.status} /><DetailStat icon="time-outline" label="Last update" value={member.lastSeen} /><DetailStat icon="footsteps" label="Past 24h" value={member.historyCount ? `${member.historyCount} trail points` : 'No trail yet'} /></View>{member.historyCount > 0 && <Pressable style={styles.trailButton} onPress={() => onShowTrail(member)}><Icon name="footsteps" size={18} color={COLORS.white} /><Text style={styles.trailButtonText}>Show 24-hour trail on map</Text><Icon name="arrow-forward" size={17} color={COLORS.white} /></Pressable>}</View></View></Modal>;
+  return <Modal visible={Boolean(member)} transparent animationType="slide" onRequestClose={onClose}><View style={styles.modalBackdrop}><Pressable style={styles.modalDismissArea} onPress={onClose} /><View style={styles.memberSheet}><View style={styles.sheetHandle} /><View style={styles.memberSheetHeader}><MemberAvatar name={member.name} initials={member.initials} avatar={member.avatar ?? null} color={member.color} size={60} /><View style={styles.memberSheetCopy}><Text style={styles.sheetTitle}>{member.name}</Text><Text style={styles.memberSheetRole}>{member.role} · {member.status}</Text></View><Pressable onPress={onClose} hitSlop={8}><Icon name="close" size={22} color={COLORS.muted} /></Pressable></View><View style={styles.memberDetailGrid}><DetailStat icon="location" label="Sharing" value={member.status} /><DetailStat icon="time-outline" label="Last update" value={member.lastSeen} /><DetailStat icon={movementDisplay(member).icon} label={movementDisplay(member).label} value={movementDisplay(member).speed} /><DetailStat icon="footsteps" label="Past 24h" value={member.historyCount ? `${member.historyCount} trail points` : 'No trail yet'} /></View>{member.historyCount > 0 && <Pressable style={styles.trailButton} onPress={() => onShowTrail(member)}><Icon name="footsteps" size={18} color={COLORS.white} /><Text style={styles.trailButtonText}>Show 24-hour trail on map</Text><Icon name="arrow-forward" size={17} color={COLORS.white} /></Pressable>}</View></View></Modal>;
 }
 
 function DetailStat({ icon, label, value }: { icon: IconName; label: string; value: string }) {
@@ -283,6 +295,7 @@ export default function App() {
   const [locationReady, setLocationReady] = useState(Platform.OS === 'web');
   const [backgroundReady, setBackgroundReady] = useState(false);
   const [currentCoordinate, setCurrentCoordinate] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [currentMovement, setCurrentMovement] = useState<{ value: Movement; recordedAt: string } | null>(null);
   const [circle, setCircle] = useState<CircleConfig | null>(null);
   const [remoteSnapshots, setRemoteSnapshots] = useState<Record<string, CircleSnapshot>>({});
   const [locationHistory, setLocationHistory] = useState<Record<string, HistoryPoint[]>>({});
@@ -296,6 +309,19 @@ export default function App() {
   const [profile, setProfile] = useState<DeviceProfile>({ name: 'This device', home: null, battery: null });
   const watcher = useRef<Location.LocationSubscription | null>(null);
   const circleRef = useRef<CircleConfig | null>(null);
+  const lastSharedTimestamp = useRef(0);
+
+  const shareLocation = useCallback((position: Location.LocationObject) => {
+    // iOS may deliver fixes every second; cap foreground network updates at once per 5s.
+    if (position.timestamp - lastSharedTimestamp.current < 5000) return;
+    lastSharedTimestamp.current = position.timestamp;
+    const location = locationWithMovement(position);
+    const recordedAt = new Date(position.timestamp).toISOString();
+    setCurrentCoordinate({ latitude: location.latitude, longitude: location.longitude });
+    setCurrentMovement({ value: parseMovement(location), recordedAt });
+    const currentCircle = circleRef.current;
+    if (currentCircle) void publishLocation(currentCircle, location, recordedAt).catch((error) => console.warn('[Free360] Foreground location queued:', error));
+  }, []);
 
   const refreshCircleData = useCallback(async () => {
     const currentCircle = circleRef.current;
@@ -325,13 +351,12 @@ export default function App() {
     const currentCircle = circleRef.current;
     if (!currentCircle || Platform.OS === 'web') return;
     try {
-      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      setCurrentCoordinate({ latitude: position.coords.latitude, longitude: position.coords.longitude });
-      await publishLocation(currentCircle, { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy }, new Date(position.timestamp).toISOString());
+      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      shareLocation(position);
     } catch (error) {
       console.warn('[Free360] Periodic location publish failed:', error);
     }
-  }, []);
+  }, [shareLocation]);
 
   useEffect(() => {
     if (!circle) return;
@@ -383,6 +408,19 @@ export default function App() {
   useEffect(() => () => { watcher.current?.remove(); }, []);
 
   useEffect(() => {
+    if (!locationEnabled || Platform.OS === 'web') return;
+    let cancelled = false;
+    let subscription: Location.LocationSubscription | null = null;
+    void Location.getMotionActivityPermissionsAsync().then(async permission => {
+      if (!permission.granted || cancelled) return;
+      const result = await Location.watchMotionActivityAsync(updateMotionActivity, () => updateMotionActivity(null));
+      if (cancelled) result.remove();
+      else subscription = result;
+    }).catch(() => updateMotionActivity(null));
+    return () => { cancelled = true; subscription?.remove(); updateMotionActivity(null); };
+  }, [locationEnabled]);
+
+  useEffect(() => {
     let cancelled = false;
     if (Platform.OS === 'web') return;
     void Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK).then(async (registered) => {
@@ -392,16 +430,12 @@ export default function App() {
       if (registered) {
         const permission = await Location.getForegroundPermissionsAsync();
         if (permission.granted && !watcher.current && !cancelled) {
-          watcher.current = await Location.watchPositionAsync({ accuracy: Location.Accuracy.Balanced, distanceInterval: 20, timeInterval: 15000 }, (position) => {
-            setCurrentCoordinate({ latitude: position.coords.latitude, longitude: position.coords.longitude });
-            const currentCircle = circleRef.current;
-            if (currentCircle) void publishLocation(currentCircle, { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy }, new Date(position.timestamp).toISOString()).catch((error) => console.warn('[Free360] Foreground location queued:', error));
-          });
+          watcher.current = await Location.watchPositionAsync({ accuracy: Location.Accuracy.High, distanceInterval: 0, timeInterval: 5000 }, shareLocation);
         }
       }
     }).catch((error) => console.warn('[Free360] Could not inspect background task:', error)).finally(() => { if (!cancelled) setLocationReady(true); });
     return () => { cancelled = true; };
-  }, []);
+  }, [shareLocation]);
 
   useEffect(() => {
     void loadCircle().then((savedCircle) => {
@@ -430,7 +464,7 @@ export default function App() {
     if (!circle) return [];
     const selfName = displayNameFor(profile.name, SELF_FALLBACK_NAME);
     const selfAvatar = avatarForProfile(profile as { avatar?: unknown });
-    const localMember: Member = { id: 'you', name: selfName, initials: initialsForName(selfName), avatar: selfAvatar, battery: profile.battery, home: profile.home, color: COLORS.deepPurple, coordinate: isValidCoordinate(currentCoordinate) ? { latitude: currentCoordinate.latitude, longitude: currentCoordinate.longitude } : null, role: circle.isOwner ? 'Circle owner' : 'Circle member', status: locationEnabled ? 'Location enabled' : 'Sharing paused', lastSeen: locationEnabled && currentCoordinate ? 'On this device' : 'No live location', isYou: true, isPaused: !locationEnabled || !currentCoordinate, historyCount: locationHistory[circle.deviceId]?.length ?? 0 };
+    const localMember: Member = { id: 'you', name: selfName, initials: initialsForName(selfName), avatar: selfAvatar, movement: freshMovement(currentMovement?.value ?? EMPTY_MOVEMENT, currentMovement?.recordedAt, now), battery: profile.battery, home: profile.home, color: COLORS.deepPurple, coordinate: isValidCoordinate(currentCoordinate) ? { latitude: currentCoordinate.latitude, longitude: currentCoordinate.longitude } : null, role: circle.isOwner ? 'Circle owner' : 'Circle member', status: locationEnabled ? 'Location enabled' : 'Sharing paused', lastSeen: locationEnabled && currentCoordinate ? 'On this device' : 'No live location', isYou: true, isPaused: !locationEnabled || !currentCoordinate, historyCount: locationHistory[circle.deviceId]?.length ?? 0 };
     const remoteMembers: Member[] = Object.entries(remoteSnapshots).map(([deviceId, snapshot], index) => {
       const remoteProfile = snapshot.profile as { name?: unknown; avatar?: unknown; battery?: unknown; home?: unknown } | undefined;
       const remoteName = typeof remoteProfile?.name === 'string' && remoteProfile.name.trim() ? remoteProfile.name.trim() : `Member ${deviceId.slice(0, 6)}`;
@@ -446,13 +480,14 @@ export default function App() {
       status: snapshot.type === 'paused' ? 'Sharing paused' : now - Date.parse(snapshot.recordedAt) > STALE_AFTER_MS ? 'Location stale' : 'Location shared',
       lastSeen: ageLabel(snapshot.recordedAt, now),
       coordinate: snapshot.type === 'location' && isValidCoordinate({ latitude: snapshot.latitude, longitude: snapshot.longitude }) ? { latitude: snapshot.latitude, longitude: snapshot.longitude } : null,
+      movement: snapshot.type === 'location' ? freshMovement(parseMovement(snapshot), snapshot.recordedAt, now) : EMPTY_MOVEMENT,
       color: ['#075F58', '#3C9AB7', '#777F8C', '#5C3C90'][index % 4],
       isPaused: snapshot.type === 'paused',
       isStale: snapshot.type === 'location' && now - Date.parse(snapshot.recordedAt) > STALE_AFTER_MS,
       historyCount: locationHistory[deviceId]?.length ?? 0,
     };});
     return [localMember, ...remoteMembers];
-  }, [circle, currentCoordinate, locationEnabled, remoteSnapshots, now, profile, locationHistory]);
+  }, [circle, currentCoordinate, currentMovement, locationEnabled, remoteSnapshots, now, profile, locationHistory]);
 
   const trailMember = useMemo(() => (trailMemberId ? mapMembers.find((member) => member.id === trailMemberId) ?? null : null), [mapMembers, trailMemberId]);
   const trailCoordinates = useMemo(() => {
@@ -465,16 +500,6 @@ export default function App() {
     setSelectedMember(null);
     setTrailMemberId(member.id);
     void refreshCircleData();
-  };
-
-  const shareLocation = (position: Location.LocationObject) => {
-    const currentCircle = circleRef.current;
-    if (!currentCircle) return;
-    void publishLocation(currentCircle, {
-      latitude: position.coords.latitude,
-      longitude: position.coords.longitude,
-      accuracy: position.coords.accuracy,
-    }, new Date(position.timestamp).toISOString()).catch((error) => console.warn('[Free360] Foreground location queued:', error));
   };
 
   const requestLocation = async () => {
@@ -490,21 +515,19 @@ export default function App() {
         return;
       }
 
-      const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      setCurrentCoordinate({ latitude: current.coords.latitude, longitude: current.coords.longitude });
+      // Motion access is optional: location sharing works even when it is denied.
+      await Location.requestMotionActivityPermissionsAsync().catch(() => null);
+      const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       shareLocation(current);
       if (!watcher.current) {
-        watcher.current = await Location.watchPositionAsync({ accuracy: Location.Accuracy.Balanced, distanceInterval: 20, timeInterval: 15000 }, (position) => {
-          setCurrentCoordinate({ latitude: position.coords.latitude, longitude: position.coords.longitude });
-          shareLocation(position);
-        });
+        watcher.current = await Location.watchPositionAsync({ accuracy: Location.Accuracy.High, distanceInterval: 0, timeInterval: 5000 }, shareLocation);
       }
 
       let backgroundStarted = false;
       try {
         const background = await Location.requestBackgroundPermissionsAsync();
         if (background.status === 'granted') {
-          if (!await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK)) await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, { accuracy: Location.Accuracy.Balanced, distanceInterval: 50, timeInterval: 30000, pausesUpdatesAutomatically: false, showsBackgroundLocationIndicator: true, foregroundService: { notificationTitle: 'Free360 location sharing', notificationBody: 'Your circle can see your location.', notificationColor: COLORS.coral } });
+          if (!await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK)) await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, { accuracy: Location.Accuracy.High, distanceInterval: 0, timeInterval: 30000, pausesUpdatesAutomatically: false, showsBackgroundLocationIndicator: true, foregroundService: { notificationTitle: 'Free360 location sharing', notificationBody: 'Your circle can see your location.', notificationColor: COLORS.coral } });
           backgroundStarted = true;
           setBackgroundReady(true);
         } else {
@@ -532,6 +555,9 @@ export default function App() {
     }
     watcher.current?.remove();
     watcher.current = null;
+    resetLocationMovement();
+    lastSharedTimestamp.current = 0;
+    setCurrentMovement(null);
     setLocationEnabled(false);
     setBackgroundReady(false);
     if (circleRef.current) {
@@ -579,8 +605,9 @@ export default function App() {
 
   const headerSelfName = displayNameFor(profile.name, SELF_FALLBACK_NAME);
   const headerSelf: Member = mapMembers.find((member) => member.isYou) ?? { id: 'you', name: headerSelfName, initials: initialsForName(headerSelfName), avatar: avatarForProfile(profile as { avatar?: unknown }), role: 'You', status: 'Sharing paused', lastSeen: 'No location yet', coordinate: null, color: COLORS.deepPurple, isYou: true, historyCount: 0 };
+  const liveSelectedMember = selectedMember ? mapMembers.find((member) => member.id === selectedMember.id) ?? selectedMember : null;
 
-  return <SafeAreaView style={[styles.appRoot, activeTab === 'map' && styles.mapAppRoot]}><StatusBar style="dark" />{activeTab !== 'map' && <Header circleName={circle?.circleName ?? 'No circle'} selfMember={headerSelf} onSettings={() => router.replace('/you')} />}<View style={styles.mainContent}>{content}</View><BottomTabs activeTab={activeTab} onTabChange={(tab) => router.replace(`/${tab}`)} />{Boolean(toast) && <View style={styles.toast}><Icon name="information-circle" size={18} color={COLORS.white} /><Text style={styles.toastText}>{toast}</Text></View>}<CheckInModal visible={checkInVisible} onClose={() => setCheckInVisible(false)} onConfirm={checkIn} /><MemberModal member={selectedMember} onShowTrail={showTrail} onClose={() => setSelectedMember(null)} /></SafeAreaView>;
+  return <SafeAreaView style={[styles.appRoot, activeTab === 'map' && styles.mapAppRoot]}><StatusBar style="dark" />{activeTab !== 'map' && <Header circleName={circle?.circleName ?? 'No circle'} selfMember={headerSelf} onSettings={() => router.replace('/you')} />}<View style={styles.mainContent}>{content}</View><BottomTabs activeTab={activeTab} onTabChange={(tab) => router.replace(`/${tab}`)} />{Boolean(toast) && <View style={styles.toast}><Icon name="information-circle" size={18} color={COLORS.white} /><Text style={styles.toastText}>{toast}</Text></View>}<CheckInModal visible={checkInVisible} onClose={() => setCheckInVisible(false)} onConfirm={checkIn} /><MemberModal member={liveSelectedMember} onShowTrail={showTrail} onClose={() => setSelectedMember(null)} /></SafeAreaView>;
 }
 
 const styles = StyleSheet.create({
@@ -625,6 +652,11 @@ const styles = StyleSheet.create({
   mapControls: { position: 'absolute', right: 16, bottom: 350 },
   mapControlButton: { width: 48, height: 48, borderRadius: 24, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', shadowColor: COLORS.deepPurple, shadowOpacity: 0.14, shadowRadius: 9, shadowOffset: { width: 0, height: 3 }, elevation: 4 },
   mapMarker: { width: 66, height: 66, borderRadius: 33, alignItems: 'center', justifyContent: 'center', borderWidth: 4, borderColor: COLORS.white, shadowColor: COLORS.deepPurple, shadowOpacity: 0.24, shadowRadius: 7, shadowOffset: { width: 0, height: 3 }, elevation: 7 },
+  mapMarkerRow: { width: 184, height: 86, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  mapAvatarColumn: { width: 66, alignItems: 'center' },
+  mapBattery: { height: 16, paddingHorizontal: 5, borderRadius: 5, backgroundColor: COLORS.white, color: COLORS.ink, fontSize: 11, textAlign: 'center' },
+  mapMovementBadge: { width: 108, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: COLORS.white, borderRadius: 14, paddingVertical: 7, borderWidth: 1, borderColor: COLORS.border },
+  mapSpeedText: { color: COLORS.ink, fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'] },
   mapMarkerStale: { opacity: 0.52 },
   mapMarkerText: { color: COLORS.white, fontSize: 23, fontWeight: '800', letterSpacing: -0.5 },
   mapAttribution: { position: 'absolute', bottom: 346, left: 7, backgroundColor: 'rgba(255,255,255,0.85)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },

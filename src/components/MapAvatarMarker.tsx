@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Marker } from 'react-native-maps';
 import { MemberAvatar } from './MemberAvatar';
+
+type MarkerIconName = keyof typeof Ionicons.glyphMap;
 
 type MapAvatarMarkerProps = {
   coordinate: { latitude: number; longitude: number };
@@ -13,6 +16,12 @@ type MapAvatarMarkerProps = {
   battery?: number | null;
   markerKey: string;
   onPress?: () => void;
+  /** Native callout title/description (movement status). */
+  title?: string;
+  description?: string;
+  accessibilityLabel?: string;
+  /** Optional movement badge rendered beside the avatar (walking/biking/driving). */
+  movementBadge?: { icon: MarkerIconName; speed: string } | null;
 };
 
 /**
@@ -32,6 +41,10 @@ export function MapAvatarMarker({
   battery,
   markerKey,
   onPress,
+  title,
+  description,
+  accessibilityLabel,
+  movementBadge,
 }: MapAvatarMarkerProps) {
   const hasPhoto = typeof avatar === 'string' && avatar.startsWith('data:image/');
   // Start tracking when a photo must async-load so it actually appears; the
@@ -54,22 +67,40 @@ export function MapAvatarMarker({
     <Marker
       key={markerKey}
       coordinate={coordinate}
-      anchor={{ x: 0.5, y: 0.5 }}
+      anchor={movementBadge ? { x: 33 / 184, y: 35 / 86 } : { x: 0.5, y: 0.5 }}
+      title={title}
+      description={description}
       onPress={onPress}
       tracksViewChanges={tracking}
     >
-      <View>
-        <View style={[styles.marker, stale && styles.stale, { backgroundColor: color, borderColor: '#FFFFFF' }]}>
-          <MemberAvatar
-            name={name}
-            initials={initials}
-            avatar={avatar}
-            color={color}
-            size={58}
-            onLoadingChange={handleLoadingChange}
-          />
+      <View
+        style={movementBadge ? styles.markerRow : undefined}
+        accessible={movementBadge ? true : undefined}
+        accessibilityLabel={movementBadge ? (accessibilityLabel ?? name) : undefined}
+      >
+        <View style={movementBadge ? styles.avatarColumn : undefined}>
+          <View style={[styles.marker, stale && styles.stale, { backgroundColor: color, borderColor: '#FFFFFF' }]}>
+            <MemberAvatar
+              name={name}
+              initials={initials}
+              avatar={avatar}
+              color={color}
+              size={58}
+              onLoadingChange={handleLoadingChange}
+            />
+          </View>
+          {movementBadge ? (
+            <Text style={styles.mapBattery}>{battery != null ? `${battery}%` : ' '}</Text>
+          ) : (
+            battery != null && <Text style={styles.battery}>{battery}%</Text>
+          )}
         </View>
-        {battery != null && <Text style={styles.battery}>{battery}%</Text>}
+        {movementBadge && (
+          <View style={styles.movementBadge}>
+            <Ionicons name={movementBadge.icon} size={17} color="#28154D" />
+            <Text style={styles.speedText}>{movementBadge.speed}</Text>
+          </View>
+        )}
       </View>
     </Marker>
   );
@@ -92,4 +123,9 @@ const styles = StyleSheet.create({
   },
   stale: { opacity: 0.52 },
   battery: { backgroundColor: 'white', textAlign: 'center', fontSize: 11 },
+  markerRow: { width: 184, height: 86, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  avatarColumn: { width: 66, alignItems: 'center' },
+  mapBattery: { height: 16, paddingHorizontal: 5, borderRadius: 5, backgroundColor: '#FFFFFF', color: '#16233B', fontSize: 11, textAlign: 'center' },
+  movementBadge: { width: 108, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: '#FFFFFF', borderRadius: 14, paddingVertical: 7, borderWidth: 1, borderColor: '#E6EAF0' },
+  speedText: { color: '#16233B', fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'] },
 });
