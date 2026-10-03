@@ -8,14 +8,18 @@ The app encrypts location snapshots, paused status, and check-ins on the device 
 
 For the managed Supabase option, **one project can host multiple independent circles**. Each phone currently belongs to one circle; each circle supports up to 20 devices. Everyone using the same project can use the same app build. The administrator sets up the project once:
 
-1. Create a Supabase project. Enable **Anonymous Sign-Ins** under Authentication settings. Supabase supplies the project's HTTPS URL, so no custom domain or separate server is needed.
-2. In the project's SQL Editor, run all of [`supabase/schema.sql`](supabase/schema.sql), then [`supabase/multi-circle.sql`](supabase/multi-circle.sql). The scripts are idempotent; re-run `schema.sql` after updating the app to pick up new schema such as 24-hour location history. For an existing project, apply `multi-circle.sql` to preserve its circle and remove the singleton limit. Then run:
+
+Sporting Life 10K
+We Run for Campfire Circle
+
+Thanks1. Create a Supabase project. Enable **Anonymous Sign-Ins** under Authentication settings -> Sign In/Providers. Supabase supplies the project's HTTPS URL, so no custom domain or separate server is needed.
+2. In the project's SQL Editor, run [`supabase/schema.sql`](supabase/schema.sql), then [`supabase/multi-circle.sql`](supabase/multi-circle.sql), then [`supabase/setup-code-security.sql`](supabase/setup-code-security.sql), in that order. The scripts are idempotent and converge to the same secure state; re-running `schema.sql` after updating the app (for example to pick up new schema such as 24-hour location history) never undoes the setup-code hardening, and re-running the hardening script never affects codes issued after it. For an existing project, applying these scripts preserves its circles and data while removing the singleton limit. Then run:
 
    ```sql
    select public.free360_new_setup_code();
    ```
 
-   Copy the returned code privately. It creates one circle and can be used once. Run the command again to issue a separate code for another circle. The project stores only hashes. Members join through the owner's invitation QR and choose their name; device UUIDs come from anonymous authentication.
+   Copy the returned code privately. It is a single-use 16-digit code (shown grouped as `XXXX-XXXX-XXXX-XXXX`; type it with or without separators) that expires 30 minutes after issue. Run the command again to issue a separate code for another circle. The project stores only sha256 hashes of codes, never plaintext. Members join through the owner's invitation QR and choose their name; device UUIDs come from anonymous authentication.
 3. In the repository root, copy `.env.example` to `.env`, keep `EXPO_PUBLIC_BACKEND=supabase`, and replace both Supabase placeholders with your project's URL and **publishable** key. Never place a `service_role` or secret key in the mobile app. Expo embeds `EXPO_PUBLIC_` values in the app bundle; the database's access rules protect the data.
 4. Install dependencies and start Expo:
 
@@ -26,11 +30,29 @@ For the managed Supabase option, **one project can host multiple independent cir
 
 5. On the owner's device, open **You → Create a private circle**, enter a circle name and the setup code, and create the circle. Then open **Invite** to show a one-time QR code. Other members need an app build configured with the **same Supabase project** and can join by scanning that QR code. An invitation expires after 15 minutes and can be claimed only once.
 
+6. Deploy the `create-circle` Edge Function. Circle creation goes through this function, which verifies the device's session and redeems the setup code server-side (the legacy direct database call is disabled):
+
+   ```sh
+   npx supabase login
+   npx supabase link --project-ref YOUR_PROJECT_REF
+   npx supabase functions deploy create-circle --no-verify-jwt
+   ```
+
+   The function validates the bearer's session with Supabase Auth itself (that is why it deploys with `--no-verify-jwt`), never accepts a client-supplied user identity, and returns sanitized JSON errors. The service-role key stays in the Edge Function environment, never the app. This step is required: without it, creating a circle fails. Re-deploy the function after updating the app.
+
 For EAS builds, set the same two `EXPO_PUBLIC_SUPABASE_*` variables in the build environment. Multiple circles within the same project share the build. Invitation QR codes identify the project, so an invitation for a different backend is rejected.
 
 ## How managed Supabase access works
 
-The database supports independent circles. A circle's owner is the device that created it with a one-time setup code. Only that owner can issue invitations. A claim is atomic: one anonymous device session can consume an invitation, after which it is unavailable. The database limits each circle to 20 devices and each device to one circle. Row-level security allows members to read only their circle's encrypted data. Writes derive the sender from the authenticated session rather than trusting a supplied device ID.
+The database supports independent circles. A circle's owner is the device that created it with a one-time setup code. Only that owner can issue invitations. A claim is atomic: one anonymous device session can consume an invitation, after which it is unavailable. Circle creation is atomic the same way: redeeming a setup code, creating the circle, and joining the owner happen in one transaction guarded by a row lock, so two devices racing the same code produce exactly one circle and the loser is told the code is used; if the insert fails, the code stays valid. The database limits each circle to 20 devices and each device to one circle. Redemption is service-only: the `create-circle` Edge Function passes the Auth user id verified from the request bearer token, and the database function accepts no client-provided identity. Guessing is throttled persistently in the database (10 attempts per device-account and 200 project-wide per 10 minutes), so limits hold across function instances. Row-level security allows members to read only their circle's encrypted data. Writes derive the sender from the authenticated session rather than trusting a supplied device ID.
+
+### Setup-code limitations
+
+- Applying the scripts above permanently invalidates old outstanding codes from before this hardening (the pre-expiry 64-hex format): they expire on first apply and cannot be revived. Issue fresh 16-digit codes afterwards. App builds that still call the legacy `free360_create_circle` database function directly stop working once the scripts are applied (permission denied); they must upgrade to a build that uses the `create-circle` Edge Function.
+- A code's 16 digits carry ~53 bits of entropy. The sha256 hashes stored in the database resist online guessing (see throttling above), but anyone who obtains a hash dump could brute-force a live code offline within its 30-minute window, and an expired/used code indefinitely. Treat project database access as sensitive.
+- Throttling is per device-account plus a project-wide backstop. Deliberately, client IP headers (`X-Forwarded-For` and friends) are NOT used: they are client-controlled and no Edge Function request header is documented as unspoofable. An attacker cycling fresh anonymous accounts (and IPs) is therefore only capped by the project-wide 200-attempts-per-10-minutes backstop; against the 10^16 code space that still makes online guessing infeasible, but it is the binding constraint, so keep the backstop low and report abuse.
+- Consumed and expired codes are retired after 7 days to bound table growth. After retirement, retrying such a code reports "invalid" rather than "already used"/"expired".
+- The self-hosted Docker backend is unchanged by all of the above; it keeps its own 64-hex setup code and endpoints.
 
 ## Names, homes, battery, and notifications
 
@@ -40,7 +62,7 @@ Save your own home using your current location or latitude/longitude. Homes appe
 
 Geofence transitions create encrypted activity entries such as "Alex arrived at Sam's home." Initial states and rapid boundary changes are suppressed to reduce false alerts. The latest 20 pending home alerts are retried after reconnect or a background location update. Alerts depend on OS scheduling, location permissions, connectivity, and the app not being force-stopped. They are not guaranteed immediate delivery.
 
-To enable Supabase push delivery, apply `multi-circle.sql` and deploy [`notify-circle`](supabase/functions/notify-circle/index.ts):
+To enable Supabase push delivery, apply the SQL scripts above and deploy [`notify-circle`](supabase/functions/notify-circle/index.ts):
 
 ```sh
 npx supabase login

@@ -1,78 +1,56 @@
--- Apply after schema.sql, including to existing projects. Existing circle data is preserved.
--- Then apply setup-code-security.sql (final migration) and deploy the
--- create-circle Edge Function; see README.md. The setup-code hardening block
--- below is intentionally identical in schema.sql, multi-circle.sql, and
--- setup-code-security.sql so reapplying any of them converges to the same
--- secure state instead of undoing it.
-begin;
-alter table public.free360_circles drop column if exists singleton;
-alter table public.free360_setup drop column if exists singleton;
-create unique index if not exists free360_setup_hash_idx on public.free360_setup(secret_hash);
-create unique index if not exists free360_circle_owner_idx on public.free360_circles(owner_id);
+-- Free360 managed-Supabase setup-code hardening (final migration).
+--
+-- Apply AFTER supabase/schema.sql and supabase/multi-circle.sql, in this order:
+--   1. supabase/schema.sql
+--   2. supabase/multi-circle.sql
+--   3. this file (supabase/setup-code-security.sql)
+-- Then issue a code (SQL Editor, project administrator only):
+--   select public.free360_new_setup_code();
+-- and deploy the create-circle Edge Function (see README.md).
+--
+-- What this migration does:
+-- - Issues cryptographically uniform 16-decimal-digit setup codes. Codes are text
+--   (never numbers) so leading zeros survive, and are returned grouped as
+--   XXXX-XXXX-XXXX-XXXX for readability. The server strips spaces/hyphens before
+--   verifying, so members may type the code with or without separators.
+-- - Stores ONLY sha256 hashes of the normalized 16 digits, with a 30-minute
+--   expiry. Plaintext codes are never stored. Randomness comes from
+--   pg_catalog.gen_random_uuid (cryptographic) via rejection sampling, so every
+--   one of the 10^16 values is equally likely. Only pg_catalog core functions
+--   are used: no extension is required.
+-- - Invalidates legacy outstanding codes ONCE: rows created before expiry
+--   tracking (expires_at IS NULL, i.e. the old 64-hex codes) are expired by the
+--   UPDATE below. Reapplying this script never touches codes issued afterwards
+--   because every new row carries a non-null expires_at. Circles, members, and
+--   all other data are preserved.
+-- - Disables the legacy direct free360_create_circle RPC for anon/authenticated
+--   callers. Circle creation goes through the service-only
+--   free360_redeem_setup_code RPC, called by the create-circle Edge Function
+--   with the Auth user id verified from the request bearer token.
+-- - Adds persistent, atomic, instance-independent rate limits (per-user and
+--   project-wide fixed windows) that commit even on rejected attempts.
+--
+-- The script is idempotent: every statement is safe to re-run. Re-running
+-- schema.sql or multi-circle.sql afterwards does NOT undo this hardening because
+-- those scripts carry the same hardened definitions and grants (the shared
+-- block below is intentionally identical in all three files).
 
-create or replace function public.free360_new_setup_code()
-returns text language plpgsql set search_path = '' as $$
-declare
-  v_hex text;
-  v_val bigint := 0;
-  v_i integer;
-  -- 115 * 10^16: largest multiple of 10^16 below 2^60. The first 15 hex chars of
-  -- a cryptographic UUID give 60 uniform bits; values below this limit are kept
-  -- (99.7% acceptance) and integer-divided by 115 for a uniform [0, 10^16).
-  v_limit constant bigint := 1150000000000000000;
-  v_code text;
-begin
-  loop
-    v_hex := pg_catalog.substr(pg_catalog.translate(pg_catalog.gen_random_uuid()::text, '-', ''), 1, 15);
-    v_val := 0;
-    for v_i in 1..15 loop
-      v_val := v_val * 16 + pg_catalog.strpos('0123456789abcdef', pg_catalog.substr(v_hex, v_i, 1)) - 1;
-    end loop;
-    exit when v_val >= 0 and v_val < v_limit;
-  end loop;
-  v_code := pg_catalog.lpad(((v_val / 115)::text), 16, '0');
-  -- Bounded growth: retire codes long past relevance.
-  delete from public.free360_setup where expires_at < now() - interval '7 days';
-  insert into public.free360_setup(secret_hash, created_at, expires_at)
-    values (pg_catalog.sha256(pg_catalog.convert_to(v_code, 'UTF8')), now(), now() + interval '30 minutes');
-  return pg_catalog.substr(v_code, 1, 4) || '-' || pg_catalog.substr(v_code, 5, 4) || '-' || pg_catalog.substr(v_code, 9, 4) || '-' || pg_catalog.substr(v_code, 13, 4);
-end;
-$$;
-revoke all on function public.free360_new_setup_code() from public, anon, authenticated;
-
-create or replace function public.free360_create_circle(p_circle_id uuid, p_setup_code text)
-returns void language plpgsql security definer set search_path = '' as $$
-declare v_user uuid := auth.uid(); v_claimed bytea;
-begin
-  if v_user is null then raise exception 'Sign in on this device first'; end if;
-  if exists (select 1 from public.free360_members where user_id = v_user) then
-    raise exception 'This device already belongs to a circle';
-  end if;
-  delete from public.free360_setup
-    where secret_hash = pg_catalog.sha256(pg_catalog.convert_to(coalesce(p_setup_code, ''), 'UTF8'))
-    returning secret_hash into v_claimed;
-  if v_claimed is null then raise exception 'Invalid or already used setup code'; end if;
-  insert into public.free360_circles(id, owner_id) values (p_circle_id, v_user);
-  insert into public.free360_members(user_id, circle_id) values (v_user, p_circle_id);
-end;
-$$;
--- Legacy direct creation RPC superseded by service-only free360_redeem_setup_code
--- (called by the create-circle Edge Function). Revoked for every API role below.
-revoke all on function public.free360_create_circle(uuid, text) from public, anon, authenticated;
-
--- Setup-code hardening (shared block, identical in schema.sql, multi-circle.sql,
--- and setup-code-security.sql). Upgrades pre-hardening free360_setup rows and
--- invalidates legacy outstanding codes ONCE (expires_at IS NULL rows only).
+-- free360_setup holds ONLY code hashes plus bookkeeping. Existing projects keep
+-- their rows; fresh installs create the table in schema.sql with this shape.
 alter table public.free360_setup add column if not exists created_at timestamptz;
 alter table public.free360_setup add column if not exists expires_at timestamptz;
 alter table public.free360_setup add column if not exists consumed_at timestamptz;
 alter table public.free360_setup add column if not exists consumed_by uuid;
+-- Invalidate legacy outstanding codes ONCE: only rows that predate expiry
+-- tracking (expires_at IS NULL) are expired here. Codes issued after this
+-- migration always carry expires_at, so reapplying never affects them.
 update public.free360_setup set created_at = coalesce(created_at, now()) where created_at is null;
 update public.free360_setup set expires_at = now() - interval '1 second' where expires_at is null;
 alter table public.free360_setup alter column created_at set default now();
 alter table public.free360_setup alter column created_at set not null;
 alter table public.free360_setup alter column expires_at set default now() + interval '30 minutes';
 alter table public.free360_setup alter column expires_at set not null;
+create unique index if not exists free360_setup_hash_idx on public.free360_setup(secret_hash);
 
 -- Persistent fixed-window rate-limit counters. One row per active bucket keeps the
 -- table bounded; stale buckets are deleted opportunistically on every check.
@@ -107,6 +85,38 @@ begin
       count = case when public.free360_setup_rate_limits.window_start < v_now - p_window then 1 else public.free360_setup_rate_limits.count + 1 end
     returning public.free360_setup_rate_limits.count into v_count;
   return v_count <= p_limit;
+end;
+$$;
+
+-- Administrator-only (SQL Editor). Issues one single-use 16-digit setup code
+-- expiring in 30 minutes and returns it grouped for readability. Only the hash
+-- is stored. No execute grant: the project administrator runs it as table owner.
+create or replace function public.free360_new_setup_code()
+returns text language plpgsql set search_path = '' as $$
+declare
+  v_hex text;
+  v_val bigint := 0;
+  v_i integer;
+  -- 115 * 10^16: largest multiple of 10^16 below 2^60. The first 15 hex chars of
+  -- a cryptographic UUID give 60 uniform bits; values below this limit are kept
+  -- (99.7% acceptance) and integer-divided by 115 for a uniform [0, 10^16).
+  v_limit constant bigint := 1150000000000000000;
+  v_code text;
+begin
+  loop
+    v_hex := pg_catalog.substr(pg_catalog.translate(pg_catalog.gen_random_uuid()::text, '-', ''), 1, 15);
+    v_val := 0;
+    for v_i in 1..15 loop
+      v_val := v_val * 16 + pg_catalog.strpos('0123456789abcdef', pg_catalog.substr(v_hex, v_i, 1)) - 1;
+    end loop;
+    exit when v_val >= 0 and v_val < v_limit;
+  end loop;
+  v_code := pg_catalog.lpad(((v_val / 115)::text), 16, '0');
+  -- Bounded growth: retire codes long past relevance.
+  delete from public.free360_setup where expires_at < now() - interval '7 days';
+  insert into public.free360_setup(secret_hash, created_at, expires_at)
+    values (pg_catalog.sha256(pg_catalog.convert_to(v_code, 'UTF8')), now(), now() + interval '30 minutes');
+  return pg_catalog.substr(v_code, 1, 4) || '-' || pg_catalog.substr(v_code, 5, 4) || '-' || pg_catalog.substr(v_code, 9, 4) || '-' || pg_catalog.substr(v_code, 13, 4);
 end;
 $$;
 
@@ -176,52 +186,23 @@ begin
   return 'ok';
 end;
 $$;
+
+-- Privilege lockdown. The generator stays administrator-only (no grant). The
+-- redemption and rate limiter are service-only; the rate limiter gets no grant
+-- at all so only the table owner and SECURITY DEFINER callers can reach it.
+-- The legacy direct creation RPC is disabled for every API role: circle
+-- creation now requires the create-circle Edge Function.
+revoke all on function public.free360_new_setup_code() from public, anon, authenticated;
 revoke all on function public.free360_setup_rate_limit(text, integer, interval) from public, anon, authenticated;
 revoke all on function public.free360_redeem_setup_code(uuid, uuid, text) from public, anon, authenticated;
 grant execute on function public.free360_redeem_setup_code(uuid, uuid, text) to service_role;
+revoke all on function public.free360_create_circle(uuid, text) from public, anon, authenticated;
 
-create table if not exists public.free360_push_tokens (
-  user_id uuid primary key references auth.users(id) on delete cascade,
-  token text not null unique
-);
-create table if not exists public.free360_push_limits (
-  user_id uuid primary key references auth.users(id) on delete cascade,
-  sent_at timestamptz not null default now()
-);
-alter table public.free360_push_tokens enable row level security;
-alter table public.free360_push_limits enable row level security;
-revoke all on public.free360_push_tokens, public.free360_push_limits from anon, authenticated;
-
-create or replace function public.free360_register_push(p_token text)
-returns void language plpgsql security definer set search_path = '' as $$
-declare v_user uuid := auth.uid();
+do $$
+declare v_outstanding integer;
 begin
-  if not exists (select 1 from public.free360_members where user_id = v_user) then raise exception 'Join a circle first'; end if;
-  if p_token !~ '^(ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]+\]$' or length(p_token) > 200 then raise exception 'Invalid push token'; end if;
-  delete from public.free360_push_tokens where token = p_token and user_id <> v_user;
-  insert into public.free360_push_tokens(user_id, token) values (v_user, p_token)
-    on conflict (user_id) do update set token = excluded.token;
+  select count(*) into v_outstanding
+    from public.free360_setup where consumed_at is null and expires_at > now();
+  raise notice 'setup-code-security applied: % unexpired outstanding setup code(s). Legacy codes without expiry were invalidated; circles/members preserved.', v_outstanding;
 end;
 $$;
-
--- Service-only function: atomically rate-limit and return tokens from the sender's circle.
-create or replace function public.free360_push_targets(p_user uuid)
-returns table(token text) language plpgsql security definer set search_path = '' as $$
-declare v_circle uuid; v_claimed uuid;
-begin
-  select circle_id into v_circle from public.free360_members where user_id = p_user;
-  if v_circle is null then raise exception 'Not a circle member'; end if;
-  insert into public.free360_push_limits(user_id, sent_at) values (p_user, now())
-    on conflict (user_id) do update set sent_at = excluded.sent_at
-    where public.free360_push_limits.sent_at < now() - interval '1 minute'
-    returning user_id into v_claimed;
-  if v_claimed is null then return; end if;
-  return query select t.token from public.free360_push_tokens t
-    join public.free360_members m on m.user_id = t.user_id
-    where m.circle_id = v_circle and m.user_id <> p_user;
-end;
-$$;
-revoke all on function public.free360_register_push(text), public.free360_push_targets(uuid) from public, anon, authenticated;
-grant execute on function public.free360_register_push(text) to authenticated;
-grant execute on function public.free360_push_targets(uuid) to service_role;
-commit;

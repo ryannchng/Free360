@@ -2,9 +2,12 @@ import * as Crypto from 'expo-crypto';
 import { secureStorage as SecureStore } from './secure-storage';
 import { fromByteArray, toByteArray } from 'base64-js';
 import nacl from 'tweetnacl';
+import { FunctionsHttpError } from '@supabase/supabase-js';
 import { getBackendUrl, isSelfHosted } from './backend';
 import { claimSelfHostedInvite, createSelfHostedCircle, createSelfHostedInvite, ensureSelfHostedSession, fetchSelfHostedHistory, fetchSelfHostedSnapshots, isSelfHostedMember, publishSelfHostedEnvelope, subscribeSelfHosted } from './self-hosted';
 import { ensureDeviceSession, getSupabase } from './supabase';
+import { normalizeSetupCode } from './setup-code';
+import { isCreateCircleSuccess, resolveCreateCircleFailureMessage } from './create-circle-result';
 import * as Battery from 'expo-battery';
 
 const CIRCLE_STORAGE_KEY = 'free360.circle.v2';
@@ -163,16 +166,62 @@ export async function createCircle(circleName: string, setupCode: string): Promi
   await saveCircle({ ...config, pending: true });
   try {
     if (isSelfHosted()) await createSelfHostedCircle(circleId, setupCode.trim());
-    else {
-      const { error } = await getSupabase().rpc('free360_create_circle', { p_circle_id: circleId, p_setup_code: setupCode.trim() });
-      if (error) throw error;
-    }
+    else await createSupabaseCircleViaFunction(circleId, setupCode);
   } catch (error) {
     if (await recoverPendingCircle(config)) return config;
     throw error;
   }
   await saveCircle(config);
   return config;
+}
+
+async function createSupabaseCircleViaFunction(circleId: string, setupCode: string) {
+  const normalized = normalizeSetupCode(setupCode);
+  if (!/^[0-9]{16}$/.test(normalized)) {
+    throw new Error('Enter the 16-digit setup code from your server setup.');
+  }
+  const { data, error } = await getSupabase().functions.invoke('create-circle', {
+    body: { circleId, setupCode: normalized },
+  });
+  if (error) throw await toCreateCircleError(error);
+  if (isCreateCircleSuccess(data)) return;
+  throw new Error(resolveCreateCircleFailureMessage(data, undefined));
+}
+
+function asFunctionsHttpError(error: unknown): FunctionsHttpError | null {
+  if (error instanceof FunctionsHttpError) return error;
+  if (isRecord(error) && error.name === 'FunctionsHttpError' && 'context' in error) {
+    return error as unknown as FunctionsHttpError;
+  }
+  return null;
+}
+
+async function readFunctionPayload(context: unknown): Promise<unknown> {
+  try {
+    if (isRecord(context) && typeof (context as { json?: unknown }).json === 'function') {
+      return await (context as unknown as Response).json();
+    }
+    if (isRecord(context)) return context;
+  } catch {
+    // Fall through to status-based messaging below.
+  }
+  return null;
+}
+
+async function toCreateCircleError(error: unknown): Promise<Error> {
+  const httpError = asFunctionsHttpError(error);
+  if (httpError) {
+    const status = (httpError.context as unknown as Response | undefined)?.status;
+    const payload = await readFunctionPayload(httpError.context);
+    return new Error(resolveCreateCircleFailureMessage(payload, status));
+  }
+  if (error instanceof Error) {
+    if (error.name === 'FunctionsFetchError' || error.name === 'FunctionsRelayError') {
+      return new Error('Could not reach the group server. Check your connection and try again.');
+    }
+    return error;
+  }
+  return new Error('Could not create the circle. Check your group server setup and try again.');
 }
 
 export async function createInvite(config: CircleConfig) {
