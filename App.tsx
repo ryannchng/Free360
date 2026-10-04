@@ -3,7 +3,7 @@ import * as Location from 'expo-location';
 import { usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -149,6 +149,10 @@ function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembe
   const actionIcon: IconName = !circleName ? 'add' : isOwner ? 'person-add-outline' : locationEnabled ? 'people-outline' : 'location-outline';
   const action = !circleName ? onCreateCircle : isOwner ? onInvite : locationEnabled ? onOpenCircle : onRequestLocation;
   const validTrail = trailCoordinates.filter(isValidCoordinate);
+  // Top inset is applied manually to the floating overlays below: the root
+  // SafeAreaView skips the top edge on the map tab so tiles render behind the
+  // status bar instead of leaving a solid bar above the map.
+  const topInset = useSafeAreaInsets().top;
   const mapMembers: MapMember[] = circleMembers.filter(member => !member.isPaused).flatMap(member => {
     const coordinate = member.isYou ? currentCoordinate : member.coordinate;
     if (!isValidCoordinate(coordinate)) return [];
@@ -163,15 +167,15 @@ function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembe
   return (
     <View style={styles.mapScreen}>
       <OpenStreetMap ref={mapRef} data={{ members: mapMembers, homes: circleMembers.filter(member => isValidCoordinate(member.home)).map(member => ({ coordinate: member.home!, name: member.name })), trail: validTrail, trailColor: trailMember?.color ?? COLORS.purple }} onOpenMember={id => { const member = circleMembers.find(member => member.id === id); if (member) onOpenMember(member); }} />
-      {!hasRealLocation && <View style={styles.mapEmptyOverlay} pointerEvents="none"><Icon name={circleName ? 'location-outline' : 'people-outline'} size={16} color={COLORS.deepPurple} /><Text style={styles.mapEmptyOverlayText}>{circleName ? 'No shared locations yet — map stays visible' : 'Start a private circle to see locations'}</Text></View>}
+      {!hasRealLocation && <View style={[styles.mapEmptyOverlay, { top: 132 + topInset }]} pointerEvents="none"><Icon name={circleName ? 'location-outline' : 'people-outline'} size={16} color={COLORS.deepPurple} /><Text style={styles.mapEmptyOverlayText}>{circleName ? 'No shared locations yet — map stays visible' : 'Start a private circle to see locations'}</Text></View>}
 
-      <View style={styles.mapTopBar}>
+      <View style={[styles.mapTopBar, { top: 12 + topInset }]}>
         <Pressable style={styles.mapRoundButton} onPress={onOpenSettings} accessibilityLabel="Open settings"><Icon name="settings-outline" size={23} color={COLORS.purple} /></Pressable>
         <Pressable style={styles.mapCirclePicker} onPress={onOpenCircle} accessibilityLabel="Open circle"><Text style={styles.mapCirclePickerText} numberOfLines={1}>{circleName || 'Your circle'}</Text><Icon name="chevron-down" size={18} color={COLORS.purple} /></Pressable>
         <Pressable style={styles.mapRoundButton} onPress={isOwner || !circleName ? onInvite : onOpenCircle} accessibilityLabel={isOwner || !circleName ? 'Invite a member' : 'View circle'}><Icon name={isOwner || !circleName ? 'person-add-outline' : 'people-outline'} size={22} color={COLORS.purple} /></Pressable>
       </View>
 
-      <View style={styles.mapTopOverlay}>
+      <View style={[styles.mapTopOverlay, { top: 73 + topInset }]}>
         <View style={styles.safePill}><View style={[styles.safeIcon, { backgroundColor: circleConnected ? COLORS.purpleSoft : COLORS.yellowSoft }]}><Icon name={circleConnected ? 'cloud-done-outline' : 'cloud-offline-outline'} size={16} color={circleConnected ? COLORS.purple : COLORS.yellow} /></View><View><Text style={styles.safePillLabel}>{!circleName ? 'NO CIRCLE YET' : circleConnected ? 'CIRCLE CONNECTED' : 'CIRCLE OFFLINE'}</Text><Text style={styles.safePillValue}>{!circleName ? 'Create or join a circle to begin' : circleMembers.some((member) => member.isStale) ? 'Some locations are stale' : circleConnected ? 'Locations are not safety alerts' : 'Updates may be delayed'}</Text></View></View>
         {!locationEnabled && <Pressable style={styles.locationPrompt} onPress={onRequestLocation}><Icon name="location-outline" size={17} color={COLORS.purple} /><Text style={styles.locationPromptText}>Turn on location sharing</Text><Icon name="arrow-forward" size={16} color={COLORS.purple} /></Pressable>}
         {trailMember && <Pressable style={styles.trailPill} onPress={onHideTrail} accessibilityLabel="Hide 24-hour trail"><Icon name="footsteps" size={15} color={COLORS.white} /><Text style={styles.trailPillText} numberOfLines={1}>{trailMember.name} · 24-hour trail</Text><Icon name="close" size={14} color={COLORS.white} /></Pressable>}
@@ -602,7 +606,7 @@ export default function App() {
   const headerSelf: Member = mapMembers.find((member) => member.isYou) ?? { id: 'you', name: headerSelfName, initials: initialsForName(headerSelfName), avatar: avatarForProfile(profile as { avatar?: unknown }), role: 'You', status: 'Sharing paused', lastSeen: 'No location yet', coordinate: null, color: COLORS.deepPurple, isYou: true, historyCount: 0 };
   const liveSelectedMember = selectedMember ? mapMembers.find((member) => member.id === selectedMember.id) ?? selectedMember : null;
 
-  return <SafeAreaView style={[styles.appRoot, activeTab === 'map' && styles.mapAppRoot]}><StatusBar style="dark" />{activeTab !== 'map' && <Header circleName={circle?.circleName ?? 'No circle'} selfMember={headerSelf} onSettings={() => router.replace('/you')} />}<View style={styles.mainContent}>{content}</View><BottomTabs activeTab={activeTab} onTabChange={(tab) => router.replace(`/${tab}`)} />{Boolean(toast) && <View style={styles.toast}><Icon name="information-circle" size={18} color={COLORS.white} /><Text style={styles.toastText}>{toast}</Text></View>}<CheckInModal visible={checkInVisible} onClose={() => setCheckInVisible(false)} onConfirm={checkIn} /><MemberModal member={liveSelectedMember} onShowTrail={showTrail} onClose={() => setSelectedMember(null)} /></SafeAreaView>;
+  return <SafeAreaView edges={activeTab === 'map' ? ['bottom', 'left', 'right'] : undefined} style={[styles.appRoot, activeTab === 'map' && styles.mapAppRoot]}><StatusBar style="dark" />{activeTab !== 'map' && <Header circleName={circle?.circleName ?? 'No circle'} selfMember={headerSelf} onSettings={() => router.replace('/you')} />}<View style={styles.mainContent}>{content}</View><BottomTabs activeTab={activeTab} onTabChange={(tab) => router.replace(`/${tab}`)} />{Boolean(toast) && <View style={styles.toast}><Icon name="information-circle" size={18} color={COLORS.white} /><Text style={styles.toastText}>{toast}</Text></View>}<CheckInModal visible={checkInVisible} onClose={() => setCheckInVisible(false)} onConfirm={checkIn} /><MemberModal member={liveSelectedMember} onShowTrail={showTrail} onClose={() => setSelectedMember(null)} /></SafeAreaView>;
 }
 
 const styles = StyleSheet.create({
