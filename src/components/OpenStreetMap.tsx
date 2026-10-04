@@ -2,6 +2,8 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import { Linking, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import type { LatLng, Region } from '../lib/map-region';
+import { isValidCoordinate } from '../lib/map-region';
+import { decideViewCommand, initialAutoFrameState, markInteracted, requestFitGroup, type AutoFrameState } from '../lib/map-autoframe';
 import { OPENSTREETMAP_HTML } from '../lib/openstreetmap-document';
 
 export type MapMember = {
@@ -9,30 +11,50 @@ export type MapMember = {
   avatar: unknown; stale: boolean; battery?: number | null; movement: string; description: string;
 };
 export type MapData = { members: MapMember[]; homes: { coordinate: LatLng; name: string }[]; trail: LatLng[]; trailColor: string };
-export type OpenStreetMapHandle = { animateToRegion: (region: Region) => void };
+export type OpenStreetMapHandle = { fitGroup: () => void };
 export type MapCommand = { type: 'render'; data: MapData } | { type: 'center'; region: Region } | { type: 'trail'; coordinates: LatLng[] };
-export type MapMessage = { type: 'ready' } | { type: 'member'; id: string };
-export type OpenStreetMapProps = { data: MapData; region: Region; onOpenMember: (id: string) => void };
+export type MapMessage = { type: 'ready' } | { type: 'member'; id: string } | { type: 'interacted' };
+export type OpenStreetMapProps = { data: MapData; onOpenMember: (id: string) => void };
 const SOURCE = { html: OPENSTREETMAP_HTML, baseUrl: 'https://free360.local/' };
 
-export const OpenStreetMap = forwardRef<OpenStreetMapHandle, OpenStreetMapProps>(function OpenStreetMap({ data, region, onOpenMember }, ref) {
+function validCoordinates(values: readonly LatLng[]): LatLng[] {
+  return values.filter(isValidCoordinate);
+}
+
+export const OpenStreetMap = forwardRef<OpenStreetMapHandle, OpenStreetMapProps>(function OpenStreetMap({ data, onOpenMember }, ref) {
   const webview = useRef<WebView>(null);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
+  const frame = useRef<AutoFrameState>(initialAutoFrameState);
+  const readyRef = useRef(ready);
+  readyRef.current = ready;
+  const dataRef = useRef(data);
+  dataRef.current = data;
   const send = useCallback((command: MapCommand) => {
     webview.current?.injectJavaScript(`window.free360Receive && window.free360Receive(${JSON.stringify(command)}); true;`);
   }, []);
-  useImperativeHandle(ref, () => ({ animateToRegion: (next) => { if (ready) send({ type: 'center', region: next }); } }), [ready, send]);
+  const applyView = useCallback(() => {
+    const decided = decideViewCommand(frame.current, {
+      ready: readyRef.current,
+      members: validCoordinates(dataRef.current.members.map((member) => member.coordinate)),
+      trail: validCoordinates(dataRef.current.trail),
+    });
+    frame.current = decided.state;
+    if (decided.command.kind === 'center') send({ type: 'center', region: decided.command.region });
+    else if (decided.command.kind === 'trail') send({ type: 'trail', coordinates: decided.command.coordinates });
+  }, [send]);
+  const applyViewRef = useRef(applyView);
+  applyViewRef.current = applyView;
+  useImperativeHandle(ref, () => ({
+    fitGroup: () => {
+      frame.current = requestFitGroup(frame.current);
+      applyViewRef.current();
+    },
+  }), []);
   const payload = JSON.stringify(data);
-  const center = JSON.stringify(region);
   const trail = JSON.stringify(data.trail);
   useEffect(() => { if (ready) send({ type: 'render', data: JSON.parse(payload) }); }, [ready, payload, send]);
-  useEffect(() => {
-    if (!ready) return;
-    const coordinates: LatLng[] = JSON.parse(trail);
-    if (coordinates.length > 1) send({ type: 'trail', coordinates });
-    else send({ type: 'center', region: JSON.parse(center) });
-  }, [ready, center, trail, send]);
+  useEffect(() => { applyView(); }, [ready, payload, trail, applyView]);
   return <View style={StyleSheet.absoluteFill}>
     <WebView ref={webview} style={styles.map} source={SOURCE} originWhitelist={['*']}
       applicationNameForUserAgent="Free360/1.0" javaScriptEnabled domStorageEnabled={false}
@@ -45,6 +67,7 @@ export const OpenStreetMap = forwardRef<OpenStreetMapHandle, OpenStreetMapProps>
         try {
           const message: MapMessage = JSON.parse(nativeEvent.data);
           if (message.type === 'ready') setReady(true);
+          if (message.type === 'interacted') frame.current = markInteracted(frame.current);
           if (message.type === 'member' && typeof message.id === 'string') onOpenMember(message.id);
         } catch { /* Ignore malformed messages. */ }
       }} />

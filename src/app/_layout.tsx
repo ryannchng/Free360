@@ -4,10 +4,19 @@ import type { NotificationResponse } from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { getNotifications } from '../lib/notifications';
+import { ensureStartupPermissions } from '../lib/startup-permissions';
 import '../lib/background-location';
 import '../lib/home-alerts';
 
 export default function RootLayout() {
+  useEffect(() => {
+    // Single startup permission check: foreground location only, and only
+    // when the OS will still show a prompt. Camera/photos/notifications stay
+    // just-in-time behind explicit user actions; background location stays
+    // behind the sharing toggle in App.tsx which carries its own rationale.
+    // The helper singleflights concurrent mounts and never throws.
+    void ensureStartupPermissions();
+  }, []);
   useEffect(() => {
     const Notifications = getNotifications();
     if (!Notifications) return;

@@ -20,13 +20,13 @@ import {
 import { MemberAvatar } from './src/components/MemberAvatar';
 import { OpenStreetMap, type OpenStreetMapHandle, type MapMember } from './src/components/OpenStreetMap';
 import { avatarForProfile, displayNameFor, initialsForName } from './src/lib/member-display';
-import { isValidCoordinate, regionForCenter, resolveMapCenter } from './src/lib/map-region';
+import { isValidCoordinate, resolveMapCenter } from './src/lib/map-region';
 import { BACKGROUND_LOCATION_TASK } from './src/lib/background-location';
 import { type CheckIn, type CircleConfig, type CircleSnapshot, fetchCircleSnapshots, fetchLocationHistory, type HistoryPoint, loadCircle, publishCheckIn, publishLocation, publishPaused, subscribeToCircle } from './src/lib/circle';
 import { loadDeviceProfile, refreshDeviceSnapshot, type DeviceProfile, type Home } from './src/lib/circle';
 import { refreshHomeMonitoring, syncHomes, flushHomeAlerts } from './src/lib/home-alerts';
 import * as Battery from 'expo-battery';
-import { EMPTY_MOVEMENT, freshMovement, parseMovement, type Movement } from './src/lib/movement';
+import { EMPTY_MOVEMENT, freshMovement, isStationaryMovement, parseMovement, type Movement } from './src/lib/movement';
 import { locationWithMovement, resetLocationMovement, updateMotionActivity } from './src/lib/location-movement';
 
 type Tab = 'map' | 'circle' | 'activity' | 'you';
@@ -91,7 +91,7 @@ function movementDisplay(member: Member) {
   const icons: Record<NonNullable<Movement['activity']>, IconName> = { stationary: 'pause', walking: 'walk', running: 'walk', biking: 'bicycle', driving: 'car' };
   const labels = { stationary: 'Still', walking: 'Walking', running: 'Running', biking: 'Biking', driving: 'In a vehicle' };
   const label = movement.activity ? `${labels[movement.activity]}${movement.activitySource === 'speed' ? ' (estimated)' : ''}` : 'Activity unavailable';
-  return { icon: movement.activity ? icons[movement.activity] : 'help-circle-outline' as IconName, label, speed: movement.speed === null ? '— km/h' : `${Math.round(movement.speed * 3.6)} km/h`, estimated: movement.activitySource === 'speed' };
+  return { activity: movement.activity, icon: movement.activity ? icons[movement.activity] : 'help-circle-outline' as IconName, label, speed: movement.speed === null ? '— km/h' : `${Math.round(movement.speed * 3.6)} km/h`, estimated: movement.activitySource === 'speed' };
 }
 
 function MemberRowAvatar({ member, size = 48 }: { member: Member; size?: number }) {
@@ -131,19 +131,18 @@ function Header({ circleName, selfMember, onSettings }: { circleName: string; se
 
 function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembers, circleConnected, selfHome, trailMember, trailCoordinates, onRequestLocation, onCheckIn, onOpenMember, onOpenCircle, onOpenSettings, onInvite, onCreateCircle, onJoinCircle, onHideTrail, isOwner }: { currentCoordinate: { latitude: number; longitude: number } | null; locationEnabled: boolean; circleName: string; circleMembers: Member[]; circleConnected: boolean; selfHome: Home | null; trailMember: Member | null; trailCoordinates: { latitude: number; longitude: number }[]; onRequestLocation: () => void; onCheckIn: () => void; onOpenMember: (member: Member) => void; onOpenCircle: () => void; onOpenSettings: () => void; onInvite: () => void; onCreateCircle: () => void; onJoinCircle: () => void; onHideTrail: () => void; isOwner: boolean }) {
   const mapRef = useRef<OpenStreetMapHandle>(null);
-  // Derive the visible center purely from already-available values: live device
+  // Derive the empty-state flag purely from already-available values: live device
   // location (only when sharing), then the first valid shared member location,
   // then a saved home, else a broad fallback. Never requests location here.
+  // The map view itself is framed by the OpenStreetMap component, which fits
+  // all members on arrival and preserves manual pan/zoom until recentered.
   const sharedCoordinates = circleMembers.filter((member) => !member.isPaused).map((member) => (member.isYou ? currentCoordinate : member.coordinate));
   const homeCoordinate = circleMembers.find((member) => member.home && isValidCoordinate(member.home))?.home ?? (isValidCoordinate(selfHome) ? selfHome : null);
   const resolved = resolveMapCenter({ currentCoordinate, locationEnabled, sharedCoordinates, home: homeCoordinate });
-  const displayCenter = resolved.center;
-  const displaySource = resolved.source;
-  const displayRegion = regionForCenter(displayCenter, displaySource);
-  const hasRealLocation = displaySource !== 'fallback';
+  const hasRealLocation = resolved.source !== 'fallback';
 
   const recenter = () => {
-    mapRef.current?.animateToRegion(displayRegion);
+    mapRef.current?.fitGroup();
   };
 
   const actionLabel = !circleName ? 'Create circle' : isOwner ? 'Invite someone' : locationEnabled ? 'Your circle' : 'Share location';
@@ -155,12 +154,15 @@ function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembe
     if (!isValidCoordinate(coordinate)) return [];
     const movement = movementDisplay(member);
     const activity = { pause: '⏸', walk: '🚶', bicycle: '🚲', car: '🚗' }[movement.icon as string] ?? '?';
-    return [{ id: member.id, coordinate, name: member.name, initials: member.initials, avatar: member.avatar ?? null, color: member.color, stale: !!member.isStale, battery: member.battery, movement: `${activity} ${movement.estimated ? '~' : ''}${movement.speed}`, description: `${movement.label} · ${movement.speed}` }];
+    // Stationary members show no pause icon or km/h bubble; the empty string
+    // tells the map document to omit the badge while avatar/name/status stay.
+    const badge = isStationaryMovement(member.movement) ? '' : `${activity} ${movement.estimated ? '~' : ''}${movement.speed}`;
+    return [{ id: member.id, coordinate, name: member.name, initials: member.initials, avatar: member.avatar ?? null, color: member.color, stale: !!member.isStale, battery: member.battery, movement: badge, description: `${movement.label} · ${movement.speed}` }];
   });
 
   return (
     <View style={styles.mapScreen}>
-      <OpenStreetMap ref={mapRef} region={displayRegion} data={{ members: mapMembers, homes: circleMembers.filter(member => isValidCoordinate(member.home)).map(member => ({ coordinate: member.home!, name: member.name })), trail: validTrail, trailColor: trailMember?.color ?? COLORS.purple }} onOpenMember={id => { const member = circleMembers.find(member => member.id === id); if (member) onOpenMember(member); }} />
+      <OpenStreetMap ref={mapRef} data={{ members: mapMembers, homes: circleMembers.filter(member => isValidCoordinate(member.home)).map(member => ({ coordinate: member.home!, name: member.name })), trail: validTrail, trailColor: trailMember?.color ?? COLORS.purple }} onOpenMember={id => { const member = circleMembers.find(member => member.id === id); if (member) onOpenMember(member); }} />
       {!hasRealLocation && <View style={styles.mapEmptyOverlay} pointerEvents="none"><Icon name={circleName ? 'location-outline' : 'people-outline'} size={16} color={COLORS.deepPurple} /><Text style={styles.mapEmptyOverlayText}>{circleName ? 'No shared locations yet — map stays visible' : 'Start a private circle to see locations'}</Text></View>}
 
       <View style={styles.mapTopBar}>
@@ -264,7 +266,7 @@ function CheckInModal({ visible, onClose, onConfirm }: { visible: boolean; onClo
 
 function MemberModal({ member, onClose, onShowTrail }: { member: Member | null; onClose: () => void; onShowTrail: (member: Member) => void }) {
   if (!member) return null;
-  return <Modal visible={Boolean(member)} transparent animationType="slide" onRequestClose={onClose}><View style={styles.modalBackdrop}><Pressable style={styles.modalDismissArea} onPress={onClose} /><View style={styles.memberSheet}><View style={styles.sheetHandle} /><View style={styles.memberSheetHeader}><MemberAvatar name={member.name} initials={member.initials} avatar={member.avatar ?? null} color={member.color} size={60} /><View style={styles.memberSheetCopy}><Text style={styles.sheetTitle}>{member.name}</Text><Text style={styles.memberSheetRole}>{member.role} · {member.status}</Text></View><Pressable onPress={onClose} hitSlop={8}><Icon name="close" size={22} color={COLORS.muted} /></Pressable></View><View style={styles.memberDetailGrid}><DetailStat icon="location" label="Sharing" value={member.status} /><DetailStat icon="time-outline" label="Last update" value={member.lastSeen} /><DetailStat icon={movementDisplay(member).icon} label={movementDisplay(member).label} value={movementDisplay(member).speed} /><DetailStat icon="footsteps" label="Past 24h" value={member.historyCount ? `${member.historyCount} trail points` : 'No trail yet'} /></View>{member.historyCount > 0 && <Pressable style={styles.trailButton} onPress={() => onShowTrail(member)}><Icon name="footsteps" size={18} color={COLORS.white} /><Text style={styles.trailButtonText}>Show 24-hour trail on map</Text><Icon name="arrow-forward" size={17} color={COLORS.white} /></Pressable>}</View></View></Modal>;
+  return <Modal visible={Boolean(member)} transparent animationType="slide" onRequestClose={onClose}><View style={styles.modalBackdrop}><Pressable style={styles.modalDismissArea} onPress={onClose} /><View style={styles.memberSheet}><View style={styles.sheetHandle} /><View style={styles.memberSheetHeader}><MemberAvatar name={member.name} initials={member.initials} avatar={member.avatar ?? null} color={member.color} size={60} /><View style={styles.memberSheetCopy}><Text style={styles.sheetTitle}>{member.name}</Text><Text style={styles.memberSheetRole}>{member.role} · {member.status}</Text></View><Pressable onPress={onClose} hitSlop={8}><Icon name="close" size={22} color={COLORS.muted} /></Pressable></View><View style={styles.memberDetailGrid}><DetailStat icon="location" label="Sharing" value={member.status} /><DetailStat icon="time-outline" label="Last update" value={member.lastSeen} />{!isStationaryMovement(member.movement) && <DetailStat icon={movementDisplay(member).icon} label={movementDisplay(member).label} value={movementDisplay(member).speed} />}<DetailStat icon="footsteps" label="Past 24h" value={member.historyCount ? `${member.historyCount} trail points` : 'No trail yet'} /></View>{member.historyCount > 0 && <Pressable style={styles.trailButton} onPress={() => onShowTrail(member)}><Icon name="footsteps" size={18} color={COLORS.white} /><Text style={styles.trailButtonText}>Show 24-hour trail on map</Text><Icon name="arrow-forward" size={17} color={COLORS.white} /></Pressable>}</View></View></Modal>;
 }
 
 function DetailStat({ icon, label, value }: { icon: IconName; label: string; value: string }) {

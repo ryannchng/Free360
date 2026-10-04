@@ -64,3 +64,42 @@ test('fallback region is broad and renderable; real locations use near delta', (
   assert.equal(near.latitudeDelta, region.MAP_NEAR_DELTA);
   assert.deepEqual(region.regionForCenter({ latitude: 1, longitude: 2 }, 'fallback'), region.MAP_FALLBACK_REGION);
 });
+
+test('group region fits every member: spread zooms out, single/coincident stay bounded', () => {
+  assert.equal(region.regionForCoordinates([]), null);
+  assert.equal(region.regionForCoordinates([null, { latitude: 91, longitude: 0 }]), null);
+  const single = region.regionForCoordinates([{ latitude: 43, longitude: -79 }]);
+  assert.deepEqual(single, { latitude: 43, longitude: -79, latitudeDelta: region.MAP_NEAR_DELTA, longitudeDelta: region.MAP_NEAR_DELTA });
+  const coincident = region.regionForCoordinates([
+    { latitude: 43, longitude: -79 },
+    { latitude: 43, longitude: -79 },
+  ]);
+  assert.equal(coincident.latitudeDelta, region.MAP_NEAR_DELTA);
+  const spread = region.regionForCoordinates([
+    { latitude: 40, longitude: -80 },
+    { latitude: 50, longitude: -70 },
+    { latitude: 'invalid', longitude: 0 },
+  ]);
+  assert.equal(spread.latitude, 45);
+  assert.equal(spread.longitude, -75);
+  assert.ok(spread.latitudeDelta >= 10 && spread.longitudeDelta >= 10);
+  const framed = region.boundsForRegion(spread);
+  assert.ok(framed.south <= 40 && framed.north >= 50 && framed.west <= -80 && framed.east >= -70);
+});
+
+test('outside-fit check gates refits: inside stays, outside refits, empty never resets', () => {
+  const fitted = region.boundsForRegion(region.regionForCoordinates([
+    { latitude: 43, longitude: -79 },
+    { latitude: 44, longitude: -78 },
+  ]));
+  assert.equal(region.isGroupOutsideFit([], fitted), false);
+  assert.equal(region.isGroupOutsideFit([], null), false);
+  assert.equal(region.isGroupOutsideFit([{ latitude: 43.5, longitude: -78.5 }], fitted), false);
+  assert.equal(region.isGroupOutsideFit([{ latitude: 43.5, longitude: -78.5 }], null), true);
+  assert.equal(region.isGroupOutsideFit([{ latitude: 60, longitude: 0 }], fitted), true);
+  // Hysteresis: just outside the edge stays, clearly outside refits.
+  const edge = fitted.north + region.MAP_NEAR_DELTA * 0.05;
+  const clear = fitted.north + (fitted.north - fitted.south) * 0.5;
+  assert.equal(region.isGroupOutsideFit([{ latitude: edge, longitude: -78.5 }], fitted), false);
+  assert.equal(region.isGroupOutsideFit([{ latitude: clear, longitude: -78.5 }], fitted), true);
+});

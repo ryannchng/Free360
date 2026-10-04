@@ -54,3 +54,14 @@ export function freshMovement(movement: Movement, recordedAt: string | undefined
   const age = now - Date.parse(recordedAt ?? '');
   return Number.isFinite(age) && age >= -5000 && age <= MOVEMENT_MAX_AGE_MS ? movement : EMPTY_MOVEMENT;
 }
+
+/**
+ * Stationary criterion for hiding movement indicators: the classified activity
+ * is stationary (under 1 km/h by the speed fallback, GPS standstill, or a
+ * confident stationary sensor reading). Speed value is irrelevant here — a
+ * stationary member shows no pause icon or km/h bubble whether speed reads
+ * zero or unknown. Unknown (null-activity) movement is not stationary.
+ */
+export function isStationaryMovement(movement: Movement | null | undefined): boolean {
+  return movement?.activity === 'stationary';
+}

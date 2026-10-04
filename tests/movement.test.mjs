@@ -5,7 +5,7 @@ import ts from 'typescript';
 
 const source = readFileSync(new URL('../src/lib/movement.ts', import.meta.url), 'utf8');
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
-const { estimateSpeed, detectMovement, parseMovement, freshMovement, EMPTY_MOVEMENT } = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`);
+const { estimateSpeed, detectMovement, parseMovement, freshMovement, isStationaryMovement, EMPTY_MOVEMENT } = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`);
 const fix = { latitude: 0, longitude: 0, accuracy: 5, timestamp: 100000 };
 
 test('GPS speed stays in m/s and rejects invalid speeds and poor accuracy', () => {
@@ -52,4 +52,16 @@ test('legacy and malformed payloads stay compatible, stale movement disappears',
   assert.deepEqual(freshMovement(movement, recordedAt, 110000), movement);
   assert.deepEqual(freshMovement(movement, recordedAt, 200000), EMPTY_MOVEMENT);
   assert.deepEqual(freshMovement(movement, undefined, 110000), EMPTY_MOVEMENT);
+});
+
+test('stationary hides movement indicators regardless of speed; moving and unknown keep theirs', () => {
+  assert.equal(isStationaryMovement({ speed: 0, activity: 'stationary', activitySource: 'speed' }), true);
+  assert.equal(isStationaryMovement({ speed: null, activity: 'stationary', activitySource: 'sensor' }), true);
+  assert.equal(isStationaryMovement({ speed: 2.5, activity: 'stationary', activitySource: 'speed' }), true);
+  assert.equal(isStationaryMovement(detectMovement(0, 100000)), true);
+  assert.equal(isStationaryMovement({ speed: 5 / 3.6, activity: 'walking', activitySource: 'speed' }), false);
+  assert.equal(isStationaryMovement({ speed: null, activity: 'driving', activitySource: 'sensor' }), false);
+  assert.equal(isStationaryMovement(EMPTY_MOVEMENT), false);
+  assert.equal(isStationaryMovement(null), false);
+  assert.equal(isStationaryMovement(undefined), false);
 });

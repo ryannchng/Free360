@@ -17,9 +17,14 @@ html,body{width:100%;height:100%;margin:0;overflow:hidden;overscroll-behavior:no
   // Web Mercator tiles end at these latitudes. Keep the entire viewport inside
   // that world, including on tall screens and when zooming all the way out.
   var world=L.latLngBounds([[-85.0511287798066,-180],[85.0511287798066,180]]);
-  // Use the same geographic anchor for wheel, double-tap and pinch.
-  // Cursor-anchored zoom otherwise also pans when the cursor is off-center.
-  var map=L.map('map',{zoomControl:false,touchZoom:'center',doubleClickZoom:'center',scrollWheelZoom:'center',attributionControl:true,maxBounds:world,maxBoundsViscosity:1,bounceAtZoomLimits:false}).setView([39.5,-98.35],3);
+  // Pinch stays anchored at the midpoint between the two fingers (touchZoom
+  // focal). Forcing 'center' here zooms around the map center instead, so an
+  // off-center pinch appears to drift downward rather than into the fingers.
+  // Leaflet's focal handler already resolves the midpoint in container-local
+  // coordinates (view offsets) and re-anchors every move (moving centroid).
+  // Wheel and double-tap intentionally stay centered to avoid cursor-anchored
+  // pans; only touch needs the focal anchor.
+  var map=L.map('map',{zoomControl:false,touchZoom:true,doubleClickZoom:'center',scrollWheelZoom:'center',attributionControl:true,maxBounds:world,maxBoundsViscosity:1,bounceAtZoomLimits:false}).setView([39.5,-98.35],3);
   function constrainViewport(){
     map.invalidateSize();
     map.setMinZoom(map.getBoundsZoom(world,true));
@@ -51,7 +56,9 @@ html,body{width:100%;height:100%;margin:0;overflow:hidden;overscroll-behavior:no
         var image=document.createElement('img');image.src=member.avatar;image.alt=member.name;avatar.appendChild(image);
       }else avatar.textContent=member.initials;
       if(member.battery!=null){var battery=document.createElement('span');battery.className='battery';battery.textContent=member.battery+'%';column.appendChild(battery);}
-      var badge=document.createElement('div');badge.className='movement';badge.textContent=member.movement;row.appendChild(badge);
+      // Stationary members send an empty movement string: omit the badge
+      // entirely (no pause icon, no km/h bubble) instead of an empty pill.
+      if(member.movement){var badge=document.createElement('div');badge.className='movement';badge.textContent=member.movement;row.appendChild(badge);}
       var marker=L.marker(point(member.coordinate),{title:member.name+', '+member.description,icon:L.divIcon({html:row,className:'avatar-marker',iconSize:[184,86],iconAnchor:[33,35]})}).addTo(markers);
       marker.on('click',function(){send({type:'member',id:member.id});});
     });
@@ -62,7 +69,8 @@ html,body{width:100%;height:100%;margin:0;overflow:hidden;overscroll-behavior:no
     if(command.type==='render')render(command.data);
     if(command.type==='center' && valid(command.region)){
       var r=command.region;
-      map.fitBounds([[Math.max(-85,r.latitude-r.latitudeDelta/2),r.longitude-r.longitudeDelta/2],[Math.min(85,r.latitude+r.latitudeDelta/2),r.longitude+r.longitudeDelta/2]],{animate:true,maxZoom:17});
+      // Padding keeps the fitted area clear of the top overlay and bottom card.
+      map.fitBounds([[Math.max(-85,r.latitude-r.latitudeDelta/2),r.longitude-r.longitudeDelta/2],[Math.min(85,r.latitude+r.latitudeDelta/2),r.longitude+r.longitudeDelta/2]],{animate:true,maxZoom:17,paddingTopLeft:[80,140],paddingBottomRight:[80,330]});
     }
     if(command.type==='trail'){
       var points=command.coordinates.filter(valid).map(point);
@@ -70,6 +78,23 @@ html,body{width:100%;height:100%;margin:0;overflow:hidden;overscroll-behavior:no
     }
   };
   window.addEventListener('message',function(event){if(event.source===window.parent && event.data.free360Command)window.free360Receive(event.data.free360Command);});
+  // Report genuine user pan/zoom so the app can suspend auto-framing.
+  // Programmatic fits (injectJavaScript/postMessage) produce no DOM gesture,
+  // so gating view events on a recent gesture distinguishes the two: taps
+  // without movement fire no view event and never count as interaction.
+  var lastGestureAt=0;
+  function noteGesture(){try{lastGestureAt=Date.now();}catch(noteError){}}
+  var mapNode=document.getElementById('map');
+  if(mapNode&&mapNode.addEventListener){
+    mapNode.addEventListener('touchstart',noteGesture,{passive:true});
+    mapNode.addEventListener('mousedown',noteGesture);
+    mapNode.addEventListener('wheel',noteGesture,{passive:true});
+    mapNode.addEventListener('dblclick',noteGesture);
+  }
+  if(document.addEventListener)document.addEventListener('keydown',noteGesture);
+  function reportIfUserDriven(){if(Date.now()-lastGestureAt<750)send({type:'interacted'});}
+  map.on('movestart',reportIfUserDriven);
+  map.on('zoomstart',reportIfUserDriven);
   new ResizeObserver(constrainViewport).observe(document.getElementById('map'));
   send({type:'ready'});
 })();
