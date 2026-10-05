@@ -1,25 +1,23 @@
+![App screenshot](assets/location-permission.jpg)
+
 # Free360
 
-Free360 is a private family location-sharing app built with Expo. A group can use a managed Supabase project or [run its own independent server with Docker](docker/README.md). Each group uses an app build configured for its backend. Members do not need an account, email address, or password. The app creates an anonymous device session.
+Free360 is a location-sharing app modeled after Life360. A group can use a Supabase project or [run its own independent server with Docker](docker/README.md). Each group uses an app build configured for its backend. Members do not need an account, email address, or password.
 
 The app encrypts location snapshots, paused status, and check-ins on the device before uploading them. Either backend stores encrypted envelopes, random device and circle IDs, invitation hashes and expiry times, and delivery timestamps. The circle encryption key stays on members' devices and in one-time invitation QR codes. The database retains one latest snapshot per device, the most recent 100 check-ins, and 24 hours of encrypted location trail points per device.
 
-## Set up a managed Supabase group project
+## Set up a server with Supabase
 
-For the managed Supabase option, **one project can host multiple independent circles**. Each phone currently belongs to one circle; each circle supports up to 20 devices. Everyone using the same project can use the same app build. The administrator sets up the project once:
+For the Supabase option, **one project can host multiple independent circles**. Each phone currently belongs to one circle; each circle supports up to 20 devices. Everyone using the same project can use the same app build. The administrator sets up the project once:
 
-
-Sporting Life 10K
-We Run for Campfire Circle
-
-Thanks1. Create a Supabase project. Enable **Anonymous Sign-Ins** under Authentication settings -> Sign In/Providers. Supabase supplies the project's HTTPS URL, so no custom domain or separate server is needed.
+1. Create a Supabase project. Enable **Anonymous Sign-Ins** under Authentication settings -> Sign In/Providers.
 2. In the project's SQL Editor, run [`supabase/schema.sql`](supabase/schema.sql), then [`supabase/multi-circle.sql`](supabase/multi-circle.sql), then [`supabase/setup-code-security.sql`](supabase/setup-code-security.sql), in that order. The scripts are idempotent and converge to the same secure state; re-running `schema.sql` after updating the app (for example to pick up new schema such as 24-hour location history) never undoes the setup-code hardening, and re-running the hardening script never affects codes issued after it. For an existing project, applying these scripts preserves its circles and data while removing the singleton limit. Then run:
 
    ```sql
    select public.free360_new_setup_code();
    ```
 
-   Copy the returned code privately. It is a single-use 16-digit code (shown grouped as `XXXX-XXXX-XXXX-XXXX`; type it with or without separators) that expires 30 minutes after issue. Run the command again to issue a separate code for another circle. The project stores only sha256 hashes of codes, never plaintext. Members join through the owner's invitation QR and choose their name; device UUIDs come from anonymous authentication.
+   Copy the returned code privately. It is a single-use 16-digit code (shown grouped as `XXXX-XXXX-XXXX-XXXX`) that expires after 30 minutes. Run the command again to issue a separate code for another circle. The project stores only sha256 hashes of codes, never plaintext. Members join through the owner's invitation QR and choose their name; device UUIDs come from anonymous authentication.
 3. In the repository root, copy `.env.example` to `.env`, keep `EXPO_PUBLIC_BACKEND=supabase`, and replace both Supabase placeholders with your project's URL and **publishable** key. Never place a `service_role` or secret key in the mobile app. Expo embeds `EXPO_PUBLIC_` values in the app bundle; the database's access rules protect the data.
 4. Install dependencies and start Expo:
 
