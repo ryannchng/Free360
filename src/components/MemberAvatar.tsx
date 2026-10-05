@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { avatarUriFor, initialsForName } from '../lib/member-display';
+import { COLORS, FONTS, RADII, SHADOWS } from '../theme';
 
 type MemberAvatarProps = {
   name?: string | null;
@@ -24,7 +25,7 @@ export function MemberAvatar({
   name,
   initials,
   avatar,
-  color = '#7944D5',
+  color = COLORS.deepPurple,
   size = 48,
   accessibilityLabel,
   badgeText,
@@ -40,13 +41,13 @@ export function MemberAvatar({
       <View
         style={[
           styles.circle,
-          { width: size, height: size, borderRadius: size / 2, backgroundColor: color },
+          { width: size, height: size, borderRadius: size * 0.3, backgroundColor: color },
         ]}
       >
         {showPhoto ? (
           <Image
             source={{ uri: uri as string }}
-            style={{ width: size, height: size, borderRadius: size / 2 }}
+            style={{ width: size, height: size, borderRadius: size * 0.3 }}
             resizeMode="cover"
             accessibilityIgnoresInvertColors
             onError={() => {
@@ -70,10 +71,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#FFFFFF',
+    borderColor: COLORS.white,
     overflow: 'hidden',
     position: 'relative',
   },
-  initials: { color: '#FFFFFF', fontWeight: '800', letterSpacing: -0.5 },
-  badge: { fontSize: 11, textAlign: 'center', color: '#718099', marginTop: 2 },
+  initials: { color: COLORS.white, fontFamily: FONTS.heavy, letterSpacing: -0.5 },
+  badge: {
+    position: 'absolute', bottom: -7, alignSelf: 'center',
+    minWidth: 36, paddingHorizontal: 6, paddingVertical: 2,
+    borderRadius: RADII.pill, backgroundColor: COLORS.white,
+    fontFamily: FONTS.bold, fontSize: 10, textAlign: 'center', color: COLORS.mint,
+    ...SHADOWS.card,
+  },
 });

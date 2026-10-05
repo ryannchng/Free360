@@ -1,3 +1,4 @@
+import { COLORS, FONTS } from '../theme';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Linking, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
@@ -71,8 +72,8 @@ export const OpenStreetMap = forwardRef<OpenStreetMapHandle, OpenStreetMapProps>
           if (message.type === 'member' && typeof message.id === 'string') onOpenMember(message.id);
         } catch { /* Ignore malformed messages. */ }
       }} />
-    {failed && <View style={styles.error}><Text>Map unavailable. Check your connection and reopen the map.</Text></View>}
+    {failed && <View style={styles.error}><Text style={styles.errorText}>Map unavailable. Check your connection and reopen the map.</Text></View>}
   </View>;
 });
 
-const styles = StyleSheet.create({ map: { flex: 1, backgroundColor: '#E6EAF0' }, error: { position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: '#E6EAF0' } });
+const styles = StyleSheet.create({ errorText: { fontFamily: FONTS.regular, color: COLORS.muted, textAlign: 'center' }, map: { flex: 1, backgroundColor: COLORS.mapLand }, error: { position: 'absolute', inset: 0, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: COLORS.mapLand } });

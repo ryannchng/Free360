@@ -1,3 +1,4 @@
+import { COLORS, FONTS, RADII, SHADOWS } from '../theme';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text, TextInput, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -85,7 +86,7 @@ export default function ProfileRoute() {
     <Text style={styles.body}>Your name is linked to this phone’s UUID. Your circle can see your name, photo, home, and last reported battery level.</Text>
     <Text style={styles.label}>PROFILE PHOTO</Text>
     <View style={styles.photoRow}>
-      <MemberAvatar name={profile.name || 'You'} avatar={avatarPreview} color="#7944D5" size={96} accessibilityLabel="Profile photo preview" />
+      <MemberAvatar name={profile.name || 'You'} avatar={avatarPreview} color={COLORS.purple} size={96} accessibilityLabel="Profile photo preview" />
       <View style={styles.photoActions}>
         <Pressable
           style={[styles.secondaryButton, (photoBusy || busy) && styles.disabledButton]}
@@ -129,19 +130,19 @@ export default function ProfileRoute() {
   </ScrollView></SafeAreaView>;
 }
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#F6F8FB' },
+  root: { flex: 1, backgroundColor: COLORS.canvas },
   content: { padding: 24, gap: 14 },
-  title: { fontSize: 26, fontWeight: '800', color: '#16233B' },
-  body: { fontSize: 14, lineHeight: 21, color: '#718099' },
-  label: { fontSize: 12, fontWeight: '700', marginTop: 16 },
-  input: { backgroundColor: 'white', borderWidth: 1, borderColor: '#E6EAF0', padding: 16, borderRadius: 12, color: '#16233B' },
-  button: { backgroundColor: '#7944D5', borderRadius: 14, padding: 17, alignItems: 'center' },
-  buttonText: { color: 'white', fontWeight: '700' },
-  link: { color: '#7944D5', paddingVertical: 12, fontWeight: '700' },
-  photoRow: { flexDirection: 'row', alignItems: 'center', gap: 16, backgroundColor: 'white', borderWidth: 1, borderColor: '#E6EAF0', borderRadius: 16, padding: 16 },
+  title: { fontFamily: FONTS.heavy, fontSize: 26, fontWeight: 'normal', color: COLORS.ink },
+  body: { fontFamily: FONTS.regular, fontSize: 14, lineHeight: 21, color: COLORS.muted },
+  label: { fontFamily: FONTS.bold, fontSize: 12, fontWeight: 'normal', marginTop: 16 },
+  input: { minHeight: 48, backgroundColor: COLORS.white, borderColor: COLORS.border, padding: 16, borderRadius: RADII.card, color: COLORS.ink, ...SHADOWS.card },
+  button: { minHeight: 48, backgroundColor: COLORS.purple, borderRadius: RADII.pill, padding: 17, alignItems: 'center', ...SHADOWS.card },
+  buttonText: { fontFamily: FONTS.bold, color: COLORS.white, fontWeight: 'normal' },
+  link: { minHeight: 48, fontFamily: FONTS.bold, color: COLORS.purple, paddingVertical: 12, fontWeight: 'normal' },
+  photoRow: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 16, backgroundColor: COLORS.white, borderColor: COLORS.border, borderRadius: RADII.card, padding: 16, ...SHADOWS.card },
   photoActions: { flex: 1, gap: 8 },
-  secondaryButton: { backgroundColor: '#F0E9FF', borderRadius: 12, paddingVertical: 11, paddingHorizontal: 14, alignItems: 'center' },
-  secondaryButtonText: { color: '#7944D5', fontWeight: '700', fontSize: 13 },
+  secondaryButton: { minHeight: 48, backgroundColor: COLORS.purpleSoft, borderRadius: RADII.card, paddingVertical: 11, paddingHorizontal: 14, alignItems: 'center', ...SHADOWS.card },
+  secondaryButtonText: { fontFamily: FONTS.bold, color: COLORS.purple, fontWeight: 'normal', fontSize: 13 },
   disabledButton: { opacity: 0.55 },
-  hint: { fontSize: 11, lineHeight: 16, color: '#9AA6B8' },
+  hint: { fontFamily: FONTS.regular, fontSize: 11, lineHeight: 16, color: COLORS.subtle },
 });

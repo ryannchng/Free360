@@ -1,5 +1,6 @@
 import { Stack, router } from 'expo-router';
 import { useEffect } from 'react';
+import { useFonts } from 'expo-font';
 import type { NotificationResponse } from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -9,6 +10,12 @@ import '../lib/background-location';
 import '../lib/home-alerts';
 
 export default function RootLayout() {
+  const [fontsLoaded, fontError] = useFonts({
+    'Poppins-Regular': require('../../assets/fonts/Poppins-Regular.ttf'),
+    'Poppins-SemiBold': require('../../assets/fonts/Poppins-SemiBold.ttf'),
+    'Poppins-Bold': require('../../assets/fonts/Poppins-Bold.ttf'),
+    'Poppins-ExtraBold': require('../../assets/fonts/Poppins-ExtraBold.ttf'),
+  });
   useEffect(() => {
     // Single startup permission check: foreground location only, and only
     // when the OS will still show a prompt. Camera/photos/notifications stay
@@ -27,6 +34,7 @@ export default function RootLayout() {
     void Notifications.getLastNotificationResponseAsync().then(response => { if (response) { open(response); void Notifications.clearLastNotificationResponseAsync(); } });
     return () => listener.remove();
   }, []);
+  if (!fontsLoaded && !fontError) return null;
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />

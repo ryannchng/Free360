@@ -1,3 +1,4 @@
+import { COLORS, RADII } from '../theme';
 import leaflet from '../../assets/leaflet/bundle.json';
 
 // No remote scripts run in the map: decrypted member data stays in this document.
@@ -5,13 +6,25 @@ export const OPENSTREETMAP_HTML = `<!doctype html><html><head>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: https://tile.openstreetmap.org; connect-src 'none';">
 <style>${leaflet.css}
-html,body{width:100%;height:100%;margin:0;overflow:hidden;overscroll-behavior:none;background:#e6eaf0}
-#map{position:fixed;inset:0;width:100%;height:100%;touch-action:none}
-.avatar-marker{background:none;border:0}.avatar-row{display:flex;align-items:center;gap:6px;width:184px}
-.avatar-column{width:66px;text-align:center}.avatar{box-sizing:border-box;width:66px;height:66px;border:4px solid white;border-radius:50%;display:flex;align-items:center;justify-content:center;color:white;font:bold 23px sans-serif;overflow:hidden;box-shadow:0 3px 7px #28154d40}
-.avatar img{width:100%;height:100%;object-fit:cover}.battery,.movement{background:white;color:#16233b;font:12px sans-serif;border-radius:8px;padding:3px 5px}.movement{max-width:108px;font-weight:bold}.stale{opacity:.52}
-.home{background:#52cbb0;color:#16233b;border:3px solid white;border-radius:50%;width:24px;height:24px;text-align:center;font:20px sans-serif}
-.leaflet-control-attribution{margin-bottom:346px!important;margin-left:7px!important;font-size:8px}
+html,body{width:100%;height:100%;margin:0;overflow:hidden;overscroll-behavior:none;background:${COLORS.mapLand};font-family:'Poppins',ui-rounded,system-ui,sans-serif}
+#map{position:fixed;inset:0;width:100%;height:100%;touch-action:none;background:${COLORS.mapPark}}
+/* Raster tiles cannot style individual features. Soften only the basemap,
+   leaving member photos, icons, trails and controls in their original colors. */
+.leaflet-tile-pane{filter:saturate(.42) brightness(1.08) contrast(.86)}
+.avatar-marker{background:none;border:0}
+.avatar-row{display:flex;align-items:center;gap:8px;width:184px}
+.avatar-column{position:relative;width:66px;text-align:center;flex-shrink:0;filter:drop-shadow(0 4px 8px #2a0a4a25)}
+.avatar-column:after{content:'';position:absolute;left:27px;top:60px;width:12px;height:12px;background:${COLORS.white};transform:rotate(45deg);border-radius:3px;z-index:-1}
+.avatar{box-sizing:border-box;width:66px;height:66px;border:4px solid ${COLORS.white};border-radius:22px;display:flex;align-items:center;justify-content:center;color:${COLORS.white};font-size:25px;font-weight:800;overflow:hidden}
+.avatar img{width:100%;height:100%;object-fit:cover}
+.battery{position:absolute;right:-6px;bottom:0;background:${COLORS.white};color:${COLORS.mint};font-size:10px;font-weight:800;border-radius:${RADII.pill}px;padding:4px 7px;box-shadow:0 2px 6px #2a0a4a12}
+.battery:before{content:'';display:inline-block;width:8px;height:5px;margin-right:3px;border-radius:2px;background:${COLORS.mint}}
+.movement{background:${COLORS.white};color:${COLORS.purple};font-size:12px;border-radius:${RADII.pill}px;padding:8px 10px;max-width:108px;font-weight:700;box-shadow:0 4px 12px #2a0a4a18}
+.stale{opacity:.52}
+.home{box-sizing:border-box;background:${COLORS.white};color:${COLORS.purple};border:0;border-radius:50%;width:32px;height:32px;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 10px #2a0a4a20}
+.home svg{width:18px;height:18px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.leaflet-control-attribution{margin-bottom:362px!important;margin-left:7px!important;font-size:9px;background:${COLORS.white}!important;border-radius:8px;padding:3px 6px!important;color:${COLORS.muted}}
+.leaflet-control-attribution a{color:${COLORS.muted}}
 </style></head><body><div id="map"></div><script>${leaflet.js}</script><script>
 (function(){
   // Web Mercator tiles end at these latitudes. Keep the entire viewport inside
@@ -45,7 +58,7 @@ html,body{width:100%;height:100%;margin:0;overflow:hidden;overscroll-behavior:no
     data.homes.forEach(function(home){
       if(!valid(home.coordinate))return;
       var el=document.createElement('div');el.className='home';el.textContent='⌂';
-      L.marker(point(home.coordinate),{title:home.name+"'s home",icon:L.divIcon({html:el,className:'avatar-marker',iconSize:[30,30],iconAnchor:[15,15]})}).addTo(markers);
+      L.marker(point(home.coordinate),{title:home.name+"'s home",icon:L.divIcon({html:el,className:'avatar-marker',iconSize:[32,32],iconAnchor:[16,16]})}).addTo(markers);
     });
     data.members.forEach(function(member){
       if(!valid(member.coordinate))return;
