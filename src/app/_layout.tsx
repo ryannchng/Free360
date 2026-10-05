@@ -1,5 +1,7 @@
 import { Stack, router } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { initializeBackendSettings } from '../lib/backend-settings';
 import type { NotificationResponse } from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -9,6 +11,16 @@ import '../lib/background-location';
 import '../lib/home-alerts';
 
 export default function RootLayout() {
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let mounted = true;
+    void initializeBackendSettings().then(() => { if (mounted) setReady(true); }).catch(() => {
+      if (mounted) setError('Could not read your saved server settings. Please try again.');
+    });
+    return () => { mounted = false; };
+  }, [attempt]);
   useEffect(() => {
     // Single startup permission check: foreground location only, and only
     // when the OS will still show a prompt. Camera/photos/notifications stay
@@ -18,6 +30,7 @@ export default function RootLayout() {
     void ensureStartupPermissions();
   }, []);
   useEffect(() => {
+    if (!ready) return;
     const Notifications = getNotifications();
     if (!Notifications) return;
     const open = (response: NotificationResponse) => {
@@ -26,7 +39,8 @@ export default function RootLayout() {
     const listener = Notifications.addNotificationResponseReceivedListener(open);
     void Notifications.getLastNotificationResponseAsync().then(response => { if (response) { open(response); void Notifications.clearLastNotificationResponseAsync(); } });
     return () => listener.remove();
-  }, []);
+  }, [ready]);
+  if (!ready) return <SafeAreaProvider><View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, gap: 16 }}>{error ? <><Text>{error}</Text><Pressable accessibilityRole="button" onPress={() => { setError(null); setAttempt(value => value + 1); }}><Text>Try again</Text></Pressable></> : <ActivityIndicator accessibilityLabel="Loading server settings" />}</View></SafeAreaProvider>;
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />

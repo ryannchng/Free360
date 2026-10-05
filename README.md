@@ -2,7 +2,7 @@
 
 # Free360
 
-Free360 is a location-sharing app modeled after Life360. A group can use a Supabase project or [run its own independent server with Docker](docker/README.md). Each group uses an app build configured for its backend. Members do not need an account, email address, or password.
+Free360 is a location-sharing app modeled after Life360. A group can use a Supabase project or [run its own independent server with Docker](docker/README.md). One shared app build supports both backends. Owners enter their server settings in the app; members scan an invitation QR to connect automatically. Members do not need an account, email address, or password.
 
 The app encrypts location snapshots, paused status, and check-ins on the device before uploading them. Either backend stores encrypted envelopes, random device and circle IDs, invitation hashes and expiry times, and delivery timestamps. The circle encryption key stays on members' devices and in one-time invitation QR codes. The database retains one latest snapshot per device, the most recent 100 check-ins, and 24 hours of encrypted location trail points per device.
 
@@ -18,15 +18,9 @@ For the Supabase option, **one project can host multiple independent circles**. 
    ```
 
    Copy the returned code privately. It is a single-use 16-digit code (shown grouped as `XXXX-XXXX-XXXX-XXXX`) that expires after 30 minutes. Run the command again to issue a separate code for another circle. The project stores only sha256 hashes of codes, never plaintext. Members join through the owner's invitation QR and choose their name; device UUIDs come from anonymous authentication.
-3. In the repository root, copy `.env.example` to `.env`, keep `EXPO_PUBLIC_BACKEND=supabase`, and replace both Supabase placeholders with your project's URL and **publishable** key. Never place a `service_role` or secret key in the mobile app. Expo embeds `EXPO_PUBLIC_` values in the app bundle; the database's access rules protect the data.
-4. Install dependencies and start Expo:
-
-   ```bash
-   npm install
-   npm start
-   ```
-
-5. On the owner's device, open **You → Create a private circle**, enter a circle name and the setup code, and create the circle. Then open **Invite** to show a one-time QR code. Other members need an app build configured with the **same Supabase project** and can join by scanning that QR code. An invitation expires after 15 minutes and can be claimed only once.
+3. Install the release APK on the owner's phone. Open **You → Create a private circle**, select **Supabase**, and enter the project's HTTPS URL and **publishable** key (`sb_publishable_…`). Never enter a `service_role` or secret key. Connection settings are saved on the phone; no mobile `.env` or custom build is required.
+4. Enter your display name, circle name and setup code, then create the circle. Deploy the Edge Function in step 6 before doing this.
+5. Open **Invite** to show a one-time QR code. Members install the same APK, choose **I have an invitation QR**, enter their name and scan it. The QR carries the backend type, URL and publishable key as well as the private invitation and circle encryption key. Members do not type server settings. Invitations expire after 15 minutes and can be claimed only once.
 
 6. Deploy the `create-circle` Edge Function. Circle creation goes through this function, which verifies the device's session and redeems the setup code server-side (the legacy direct database call is disabled):
 
@@ -38,7 +32,20 @@ For the Supabase option, **one project can host multiple independent circles**. 
 
    The function validates the bearer's session with Supabase Auth itself (that is why it deploys with `--no-verify-jwt`), never accepts a client-supplied user identity, and returns sanitized JSON errors. The service-role key stays in the Edge Function environment, never the app. This step is required: without it, creating a circle fails. Re-deploy the function after updating the app.
 
-For EAS builds, set the same two `EXPO_PUBLIC_SUPABASE_*` variables in the build environment. Multiple circles within the same project share the build. Invitation QR codes identify the project, so an invitation for a different backend is rejected.
+## Build a shared Android APK
+
+Maintainers install dependencies with `npm install`, link/configure the EAS project, and build the existing standalone APK profile:
+
+```sh
+npx eas-cli@latest build:configure
+npx eas-cli@latest build --profile preview --platform android
+```
+
+Publish the resulting APK in a GitHub Release. Users only download and install it; they do not need the repository, Expo Go, or a development server. Server-specific `EXPO_PUBLIC_*` build variables are optional legacy defaults; omit them for a generic release. EAS project and push credentials are still configured by the app maintainer.
+
+Saved server settings load before the app starts syncing, including in background tasks. Existing `.env` builds retain their defaults and save them locally. When upgrading an older installation directly to an APK with no defaults, enter its original server settings on the create-circle screen and tap **Save server connection** to restore access; the existing circle and matching anonymous session are retained. A phone with a circle or pending setup cannot switch to another server; use a fresh installation with cleared app data for that, and obtain a new invitation. Clearing the owner's data loses invitation ownership, so preserve that installation.
+
+New invitations configure the connection automatically. Older QR codes work only if the receiving phone already has matching server settings; otherwise ask the owner to update and generate a new code.
 
 ## How managed Supabase access works
 
@@ -80,9 +87,7 @@ Anonymous sessions and the circle key live on each device. If a device loses its
 
 ## Location behavior
 
-Sharing is off until a member enables it. Foreground updates and check-ins upload through HTTPS; the app checks for updates while open (every five seconds with the standalone server). While the app is open, every member's locations are refreshed from the server every five minutes, alongside realtime updates. The app stores an encrypted 24-hour location trail per device: trail points are added at most every five minutes after meaningful movement (or on jumps of a kilometer or more), so a stationary phone does not accumulate duplicate points. Tap a member and choose **Show 24-hour trail on map** to see where they have been; the trail older than 24 hours is deleted server-side on every publish. The latest encrypted snapshot is queued on the device during an outage and retried after reconnect. Intermediate points between stored trail points are not retained. A stale map marker is not a safety confirmation.
-
-Expo Go can preview the app, but continuous background location requires a development build. Test on physical Android and iOS devices before relying on background delivery; OS scheduling, permissions, connectivity, and force-quits can interrupt it. Free360 does not provide emergency response or automatic safety alerts.
+Location sharing will try to be enabled by default. Foreground updates and check-ins upload through HTTPS; the app checks for updates while open (every five seconds with the standalone server). While the app is open, every member's locations are refreshed from the server every five minutes, alongside realtime updates. The app stores an encrypted 24-hour location trail per device: trail points are added at most every five minutes after meaningful movement (or on jumps of a kilometer or more), so a stationary phone does not accumulate duplicate points. Tap a member and choose **Show 24-hour trail on map** to see where they have been; the trail older than 24 hours is deleted server-side on every publish. The latest encrypted snapshot is queued on the device during an outage and retried after reconnect. Intermediate points between stored trail points are not retained. A stale map marker is not a safety confirmation.
 
 ```bash
 npx eas-cli@latest build:configure
@@ -91,7 +96,7 @@ npx eas-cli@latest build --profile development --platform android
 
 ## Map rendering
 
-Free360 renders OpenStreetMap tiles with a bundled Leaflet map in `react-native-webview` on Android and iOS, and an iframe on web. It does not use the Google Maps SDK or require a Google Maps API key. Member avatars, homes, marker taps, recentering, and location trails use this map.
+Map rendering is done through OpenStreetMap tiles with a bundled Leaflet map in `react-native-webview` on Android and iOS, and an iframe on web. It does not use the Google Maps SDK or require a Google Maps API key. Member avatars, homes, marker taps, recentering, and location trails use this map.
 
 Existing development builds need to be rebuilt after installing the WebView native module (`npm run android` locally, or a new EAS development build). Expo Go already includes WebView. Only tiles require network access; Leaflet's JavaScript and CSS are bundled with the app. Tiles follow the [OpenStreetMap tile usage policy](https://operations.osmfoundation.org/policies/tiles/), including visible attribution and normal HTTP caching.
 
@@ -102,5 +107,6 @@ After changing the Leaflet version, run `npm run bundle:leaflet` to regenerate i
 ```bash
 npx expo lint
 npx tsc --noEmit
+node tests/backend-connection.test.cjs
 npx expo-doctor
 ```

@@ -3,24 +3,31 @@ import 'expo-sqlite/localStorage/install';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { AppState, Platform } from 'react-native';
 
-const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
-const key = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+import { getBackendSettings } from './backend-settings';
+
+let clientSettings = '';
+let appStateListener: ReturnType<typeof AppState.addEventListener> | null = null;
 
 let client: SupabaseClient | null = null;
 let signIn: Promise<string> | null = null;
 
 export function isSupabaseConfigured() {
-  return Boolean(url && key && /^https:\/\//.test(url) && !url.includes('your-project-ref') && key !== 'your-publishable-key');
+  return getBackendSettings()?.backend === 'supabase';
 }
 
 export function getSupabase() {
-  if (!isSupabaseConfigured()) {
-    throw new Error('This Free360 build needs EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY. See README.md.');
-  }
-  if (!client) {
-    client = createClient(url!, key!, {
+  const settings = getBackendSettings();
+  if (settings?.backend !== 'supabase') throw new Error('Configure your Supabase server or scan an invitation QR.');
+  const identity = JSON.stringify(settings);
+  if (!client || clientSettings !== identity) {
+    client?.auth.stopAutoRefresh();
+    if (client) void client.removeAllChannels();
+    appStateListener?.remove();
+    clientSettings = identity;
+    client = createClient(settings.url, settings.publishableKey, {
       auth: {
         storage: localStorage,
+        storageKey: `free360.auth.${encodeURIComponent(settings.url)}`,
         autoRefreshToken: true,
         persistSession: true,
         detectSessionInUrl: false,
@@ -28,7 +35,7 @@ export function getSupabase() {
     });
     if (Platform.OS !== 'web') {
       const current = client;
-      AppState.addEventListener('change', (state) => {
+      appStateListener = AppState.addEventListener('change', (state) => {
         if (state === 'active') current.auth.startAutoRefresh();
         else current.auth.stopAutoRefresh();
       });
@@ -40,7 +47,7 @@ export function getSupabase() {
 
 export function getProjectUrl() {
   getSupabase();
-  return url!.replace(/\/$/, '');
+  return getBackendSettings()!.url;
 }
 
 export async function ensureDeviceSession() {

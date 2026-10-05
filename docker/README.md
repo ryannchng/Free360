@@ -1,6 +1,6 @@
 # Run your own Free360 server
 
-This option runs a **standalone Free360 server** in one Docker container. It uses Node.js and a persistent SQLite database. It does not run, call, or require Supabase. The existing managed Supabase option remains available for separate app builds.
+This option runs a **standalone Free360 server** in one Docker container. It uses Node.js and a persistent SQLite database. It does not run, call, or require Supabase. The same release APK also supports managed Supabase projects.
 
 The server stores random device IDs, hashes of device tokens and invitation secrets, encrypted location snapshots, encrypted check-ins, and encrypted 24-hour location trail points. The circle encryption key remains on members' phones and in one-time invitation QR codes. One server hosts one circle, with at most 20 devices. The server retains one latest snapshot per device, 100 recent check-ins, and the last 2000 trail points per device within 24 hours. The history table is created automatically on restart, so updating an existing server only requires rebuilding the container.
 
@@ -28,16 +28,9 @@ The server stores random device IDs, hashes of device tokens and invitation secr
 
 ## Connect the mobile app
 
-In the repository root, copy `.env.example` to `.env` and set:
+Install the release APK, open **Create a private circle**, select **Self-hosted**, and enter your server's HTTPS URL. Enter your display name, circle name and the setup code from `docker/.env`. The connection is saved on the phone; no mobile `.env`, repository checkout or custom build is required.
 
-```dotenv
-EXPO_PUBLIC_BACKEND=self-hosted
-EXPO_PUBLIC_SELF_HOSTED_URL=https://group.example.com
-```
-
-The `EXPO_PUBLIC_SUPABASE_*` values are not used in this mode. Install dependencies with `npm install` and run `npm start`, or build the app with the same two public variables in its EAS environment. Every member needs an app build configured with the same server URL.
-
-On the owner's device, open **Create a private circle** and enter the setup code from `docker/.env`. The owner can then create one-time invitation QR codes for other devices. The QR includes the server URL, circle key, and invitation secret; keep it private until claimed. An invitation expires after 15 minutes and works once.
+The owner can then create one-time invitation QR codes. Members install the same APK and scan the owner's QR; their server connection is configured automatically. The QR includes the backend type, server URL, circle key and invitation secret; keep it private until claimed. An invitation expires after 15 minutes and works once.
 
 After creating the circle, remove `FREE360_SETUP_CODE` from `docker/.env` if desired and run `docker compose up -d` to recreate the container. The server needs that value only while initializing a fresh database; it stores a hash in SQLite. Do not remove the Docker volume when updating or restarting the server.
 
