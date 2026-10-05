@@ -4,8 +4,8 @@ import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { createCircle, loadDeviceProfile, saveDeviceProfile, publishPaused } from '../lib/circle';
-import { isBackendConfigured, isSelfHosted } from '../lib/backend';
+import { createCircle, loadCircle, loadDeviceProfile, saveDeviceProfile, publishPaused } from '../lib/circle';
+import { getBackendSettings, saveBackendSettings, validateBackendSettings } from '../lib/backend-settings';
 import { formatSetupCode, isSetupCodeValid, SETUP_CODE_INPUT_MAX_LENGTH } from '../lib/setup-code';
 
 const ink = COLORS.ink;
@@ -18,8 +18,15 @@ export default function CreateCircleRoute() {
   const [setupCode, setSetupCode] = useState('');
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState('');
-  const selfHostedMode = isSelfHosted();
-  const configured = isBackendConfigured();
+  const [backend, setBackend] = useState<'supabase' | 'self-hosted'>(() => getBackendSettings()?.backend ?? 'supabase');
+  const [serverUrl, setServerUrl] = useState(() => getBackendSettings()?.url ?? '');
+  const [publishableKey, setPublishableKey] = useState(() => {
+    const saved = getBackendSettings();
+    return saved?.backend === 'supabase' ? saved.publishableKey : '';
+  });
+  const selfHostedMode = backend === 'self-hosted';
+  let configured = false;
+  try { validateBackendSettings({ backend, url: serverUrl, publishableKey }); configured = true; } catch { /* Keep creation disabled until settings are valid. */ }
   const codeValid = selfHostedMode ? setupCode.trim().length > 0 : isSetupCodeValid(setupCode);
   const canCreate = !saving && configured && Boolean(name.trim()) && Boolean(circleName.trim()) && codeValid;
 
@@ -31,10 +38,23 @@ export default function CreateCircleRoute() {
     setSetupCode(formatSetupCode(next));
   };
 
+  const saveConnection = async () => {
+    setSaving(true);
+    try {
+      await saveBackendSettings({ backend, url: serverUrl, publishableKey });
+      if (await loadCircle()) router.replace('/map');
+      else Alert.alert('Server connection saved', 'You can now create your circle below.');
+    } catch (error) {
+      Alert.alert('Could not save server', error instanceof Error ? error.message : 'Check your server settings.');
+    } finally { setSaving(false); }
+  };
+
   const create = async () => {
     setSaving(true);
     try {
       if (!name.trim()) throw new Error('Enter your name.');
+      await saveBackendSettings({ backend, url: serverUrl, publishableKey });
+      if (await loadCircle()) { router.replace('/map'); return; }
       await saveDeviceProfile({ ...await loadDeviceProfile(), name: name.trim() });
       const circle = await createCircle(circleName, setupCode);
       await publishPaused(circle).catch(() => {});
@@ -46,7 +66,60 @@ export default function CreateCircleRoute() {
     }
   };
 
-  return <SafeAreaView style={styles.root}><KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}><ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled"><Pressable style={styles.back} onPress={() => router.back()}><Ionicons name="arrow-back" size={20} color={ink} /></Pressable><View style={styles.icon}><Ionicons name="server-outline" size={31} color={coral} /></View><Text style={styles.title}>Create your circle</Text><Text style={styles.body}>This Free360 build connects to your configured server. Your location and check-ins are encrypted on your device before they are stored there.</Text><View style={styles.notice}><Ionicons name="shield-checkmark-outline" size={19} color={COLORS.mint} /><Text style={styles.noticeText}>{configured ? `Your ${selfHostedMode ? 'self-hosted' : 'Supabase'} group server is configured. ${selfHostedMode ? "One circle can be created here." : "Multiple circles can use this project."}` : 'This build needs a group server. Follow the setup instructions in README.md before creating a circle.'}</Text></View><Text style={styles.label}>YOUR NAME</Text><TextInput accessibilityLabel="Your name" value={name} onChangeText={setName} style={styles.input} placeholder="Your name" maxLength={40} /><Text style={styles.label}>CIRCLE NAME</Text><TextInput value={circleName} onChangeText={setCircleName} style={styles.input} placeholder="My Circle" placeholderTextColor={COLORS.subtle} maxLength={40} /><Text style={styles.label}>GROUP SETUP CODE</Text>{selfHostedMode ? <TextInput autoCapitalize="none" autoCorrect={false} secureTextEntry value={setupCode} onChangeText={setSetupCode} style={styles.input} placeholder="Code from your server setup" placeholderTextColor={COLORS.subtle} /> : <><TextInput accessibilityLabel="16-digit setup code" accessibilityHint="Enter the 16 digits from your server setup. Each code expires after it is used." value={setupCode} onChangeText={handleSetupCodeChange} style={styles.input} placeholder="1234 5678 9012 3456" placeholderTextColor={COLORS.subtle} keyboardType="number-pad" autoCapitalize="none" autoCorrect={false} autoComplete="one-time-code" textContentType="oneTimeCode" returnKeyType="done" maxLength={SETUP_CODE_INPUT_MAX_LENGTH} /><Text style={styles.help}>Enter the 16 digits from your server setup. Each code can be used once and expires after use.</Text></>}<Pressable disabled={!canCreate} style={[styles.primary, !canCreate && styles.disabled]} onPress={() => void create()}>{saving ? <ActivityIndicator color={COLORS.white} /> : <><Text style={styles.primaryText}>Create private circle</Text><Ionicons name="arrow-forward" size={18} color={COLORS.white} /></>}</Pressable><Pressable style={styles.secondary} onPress={() => router.push('/join')}><Ionicons name="qr-code-outline" size={20} color={coral} /><Text style={styles.secondaryText}>I have an invitation QR</Text></Pressable><Text style={styles.footnote}>The device that creates the circle becomes its owner. It can make one-time QR invitations for other phones.</Text></ScrollView></KeyboardAvoidingView></SafeAreaView>;
+  return (
+    <SafeAreaView style={styles.root}>
+      <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <Pressable accessibilityRole="button" accessibilityLabel="Back" style={styles.back} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={20} color={ink} />
+          </Pressable>
+          <View style={styles.icon}><Ionicons name="server-outline" size={31} color={coral} /></View>
+          <Text style={styles.title}>Create your circle</Text>
+          <Text style={styles.body}>Choose the server your circle will use. Members connect automatically by scanning your invitation QR. Your location and check-ins are encrypted on your device before they are stored there.</Text>
+          <View style={styles.notice}>
+            <Ionicons name="shield-checkmark-outline" size={19} color={COLORS.mint} />
+            <Text style={styles.noticeText}>Your server administrator provides the connection settings and a setup code. {selfHostedMode ? 'One circle can be created on each standalone server.' : 'Multiple circles can use one Supabase project.'}</Text>
+          </View>
+          <Text style={styles.label}>SERVER TYPE</Text>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            {(['supabase', 'self-hosted'] as const).map(type => (
+              <Pressable key={type} disabled={saving} accessibilityRole="radio" accessibilityState={{ selected: backend === type, disabled: saving }} style={[styles.secondary, { flex: 1 }]} onPress={() => { setBackend(type); setSetupCode(''); }}>
+                <Text style={styles.secondaryText}>{backend === type ? '✓ ' : ''}{type === 'supabase' ? 'Supabase' : 'Self-hosted'}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Text style={styles.label}>SERVER HTTPS URL</Text>
+          <TextInput accessibilityLabel="Server HTTPS URL" editable={!saving} value={serverUrl} onChangeText={setServerUrl} autoCapitalize="none" autoCorrect={false} keyboardType="url" maxLength={2048} style={styles.input} placeholder={selfHostedMode ? 'https://your-server.com' : 'https://your-project.supabase.co'} />
+          {!selfHostedMode && <>
+            <Text style={styles.label}>SUPABASE PUBLISHABLE KEY</Text>
+            <TextInput accessibilityLabel="Supabase publishable key" editable={!saving} value={publishableKey} onChangeText={setPublishableKey} autoCapitalize="none" autoCorrect={false} maxLength={1024} style={styles.input} placeholder="sb_publishable_…" />
+            <Text style={styles.help}>Use the publishable key from your project. Never enter a secret or service-role key.</Text>
+          </>}
+          <Pressable accessibilityRole="button" disabled={!configured || saving} style={[styles.secondary, (!configured || saving) && styles.disabled]} onPress={() => void saveConnection()}>
+            <Text style={styles.secondaryText}>Save server connection</Text>
+          </Pressable>
+          <Text style={styles.label}>YOUR NAME</Text>
+          <TextInput accessibilityLabel="Your name" editable={!saving} value={name} onChangeText={setName} style={styles.input} placeholder="Your name" maxLength={40} />
+          <Text style={styles.label}>CIRCLE NAME</Text>
+          <TextInput accessibilityLabel="Circle name" editable={!saving} value={circleName} onChangeText={setCircleName} style={styles.input} placeholder="My Circle" placeholderTextColor={COLORS.subtle} maxLength={40} />
+          <Text style={styles.label}>GROUP SETUP CODE</Text>
+          {selfHostedMode ? (
+            <TextInput accessibilityLabel="Server setup code" editable={!saving} autoCapitalize="none" autoCorrect={false} secureTextEntry value={setupCode} onChangeText={setSetupCode} style={styles.input} placeholder="Code from your server setup" placeholderTextColor={COLORS.subtle} />
+          ) : <>
+            <TextInput accessibilityLabel="16-digit setup code" accessibilityHint="Enter the 16 digits from your server setup. Each code expires after it is used." editable={!saving} value={setupCode} onChangeText={handleSetupCodeChange} style={styles.input} placeholder="1234 5678 9012 3456" placeholderTextColor={COLORS.subtle} keyboardType="number-pad" autoCapitalize="none" autoCorrect={false} autoComplete="one-time-code" textContentType="oneTimeCode" returnKeyType="done" maxLength={SETUP_CODE_INPUT_MAX_LENGTH} />
+            <Text style={styles.help}>Enter the 16 digits from your server setup. Each code can be used once and expires after use.</Text>
+          </>}
+          <Pressable accessibilityRole="button" disabled={!canCreate} style={[styles.primary, !canCreate && styles.disabled]} onPress={() => void create()}>
+            {saving ? <ActivityIndicator color={COLORS.white} /> : <><Text style={styles.primaryText}>Create private circle</Text><Ionicons name="arrow-forward" size={18} color={COLORS.white} /></>}
+          </Pressable>
+          <Pressable accessibilityRole="button" disabled={saving} style={styles.secondary} onPress={() => router.push('/join')}>
+            <Ionicons name="qr-code-outline" size={20} color={coral} /><Text style={styles.secondaryText}>I have an invitation QR</Text>
+          </Pressable>
+          <Text style={styles.footnote}>The device that creates the circle becomes its owner. It can make one-time QR invitations for other phones.</Text>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
 }
 
 const styles = StyleSheet.create({

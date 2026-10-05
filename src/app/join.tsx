@@ -23,8 +23,8 @@ export default function JoinRoute() {
     setScanned(true);
     setJoining(true);
     try {
-      await saveDeviceProfile({ ...await loadDeviceProfile(), name: name.trim() });
       const circle = await joinCircle(value);
+      await saveDeviceProfile({ ...await loadDeviceProfile(), name: name.trim() });
       await publishPaused(circle).catch(() => {});
       router.replace('/map');
     } catch (error) {
@@ -39,7 +39,7 @@ export default function JoinRoute() {
   if (!permission) return <View style={styles.loading}><ActivityIndicator color={coral} /></View>;
   if (!permission.granted) return <SafeAreaView style={styles.permissionRoot}><View style={styles.permissionContent}><View style={styles.permissionIcon}><Ionicons name="camera-outline" size={33} color={coral} /></View><Text style={styles.permissionTitle}>Scan a private invitation</Text><Text style={styles.permissionText}>Free360 only uses the camera to read the invitation QR code.</Text><Pressable style={styles.allow} onPress={() => void requestPermission()}><Text style={styles.allowText}>Allow camera access</Text></Pressable><Pressable style={styles.cancel} onPress={() => router.back()}><Text style={styles.cancelText}>Not now</Text></Pressable></View></SafeAreaView>;
 
-  return <View style={styles.cameraRoot}><CameraView style={StyleSheet.absoluteFill} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onBarcodeScanned={scanned ? undefined : ({ data }) => void claim(data)} /><SafeAreaView style={styles.overlay}><View style={styles.top}><Pressable style={styles.close} onPress={() => router.back()}><Ionicons name="close" size={22} color={COLORS.white} /></Pressable><Text style={styles.scanTitle}>Scan invitation QR</Text><View style={styles.close} /></View><View style={styles.center}><View style={styles.scanFrame}><View style={[styles.corner, styles.topLeft]} /><View style={[styles.corner, styles.topRight]} /><View style={[styles.corner, styles.bottomLeft]} /><View style={[styles.corner, styles.bottomRight]} /></View><Text style={styles.scanBody}>Point your camera at the code shown by your circle owner.</Text></View>{joining && <View style={styles.joining}><ActivityIndicator color={COLORS.white} /><Text style={styles.joiningText}>Joining private circle…</Text></View>}</SafeAreaView></View>;
+  return <View style={styles.cameraRoot}><CameraView style={StyleSheet.absoluteFill} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onBarcodeScanned={scanned ? undefined : ({ data }) => void claim(data)} /><SafeAreaView style={styles.overlay}><View style={styles.top}><Pressable style={styles.close} onPress={() => router.back()}><Ionicons name="close" size={22} color={COLORS.white} /></Pressable><Text style={styles.scanTitle}>Scan invitation QR</Text><View style={styles.close} /></View><View style={styles.center}><View style={styles.scanFrame}><View style={[styles.corner, styles.topLeft]} /><View style={[styles.corner, styles.topRight]} /><View style={[styles.corner, styles.bottomLeft]} /><View style={[styles.corner, styles.bottomRight]} /></View><Text style={styles.scanBody}>Point your camera at the code shown by your circle owner. Your server connection is set up automatically.</Text></View>{joining && <View style={styles.joining}><ActivityIndicator color={COLORS.white} /><Text style={styles.joiningText}>Joining private circle…</Text></View>}</SafeAreaView></View>;
 }
 
 const styles = StyleSheet.create({

@@ -29,6 +29,8 @@ import { refreshHomeMonitoring, syncHomes, flushHomeAlerts } from './src/lib/hom
 import * as Battery from 'expo-battery';
 import { EMPTY_MOVEMENT, freshMovement, isStationaryMovement, parseMovement, type Movement } from './src/lib/movement';
 import { locationWithMovement, resetLocationMovement, updateMotionActivity } from './src/lib/location-movement';
+import { secureStorage } from './src/lib/secure-storage';
+import { SELF_STAY_KEY, ADDRESS_FAILURE_RETRY_MS, addressBucket, createAddressResolver, parseStay, selfStatusLine, updateStay, type StayState } from './src/lib/location-stay';
 
 type Tab = 'map' | 'circle' | 'activity' | 'you';
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -57,6 +59,15 @@ type Member = {
 const SELF_FALLBACK_NAME = 'You';
 const STALE_AFTER_MS = 5 * 60 * 1000;
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
+// Best-effort native street lookup for the self row only: cached per ~110m
+// bucket, never called on web (the native geocoder is unavailable there),
+// failures resolve to null so the row falls back to "current location".
+// Addresses stay on this device for display and are never published.
+const selfAddressResolver = createAddressResolver((coordinate) => {
+  if (Platform.OS === 'web') return Promise.resolve(null);
+  return Location.reverseGeocodeAsync(coordinate);
+});
 
 function ageLabel(recordedAt: string, now: number) {
   const minutes = Math.max(0, Math.floor((now - Date.parse(recordedAt)) / 60000));
@@ -112,7 +123,7 @@ function Header({ circleName, selfMember, onSettings }: { circleName: string; se
   );
 }
 
-function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembers, circleConnected, selfHome, trailMember, trailCoordinates, onRequestLocation, onCheckIn, onOpenMember, onOpenCircle, onOpenSettings, onInvite, onCreateCircle, onJoinCircle, onHideTrail, isOwner }: { currentCoordinate: { latitude: number; longitude: number } | null; locationEnabled: boolean; circleName: string; circleMembers: Member[]; circleConnected: boolean; selfHome: Home | null; trailMember: Member | null; trailCoordinates: { latitude: number; longitude: number }[]; onRequestLocation: () => void; onCheckIn: () => void; onOpenMember: (member: Member) => void; onOpenCircle: () => void; onOpenSettings: () => void; onInvite: () => void; onCreateCircle: () => void; onJoinCircle: () => void; onHideTrail: () => void; isOwner: boolean }) {
+function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembers, circleConnected, selfHome, trailMember, trailCoordinates, selfStaySince, selfAddress, nowMs, onRequestLocation, onCheckIn, onOpenMember, onOpenCircle, onOpenSettings, onInvite, onCreateCircle, onJoinCircle, onHideTrail, isOwner }: { currentCoordinate: { latitude: number; longitude: number } | null; locationEnabled: boolean; circleName: string; circleMembers: Member[]; circleConnected: boolean; selfHome: Home | null; trailMember: Member | null; trailCoordinates: { latitude: number; longitude: number }[]; selfStaySince: number | null; selfAddress: string | null; nowMs: number; onRequestLocation: () => void; onCheckIn: () => void; onOpenMember: (member: Member) => void; onOpenCircle: () => void; onOpenSettings: () => void; onInvite: () => void; onCreateCircle: () => void; onJoinCircle: () => void; onHideTrail: () => void; isOwner: boolean }) {
   const mapRef = useRef<OpenStreetMapHandle>(null);
   // Derive the empty-state flag purely from already-available values: live device
   // location (only when sharing), then the first valid shared member location,
@@ -174,7 +185,11 @@ function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembe
       <View style={styles.mapBottomCard}>
         <View style={styles.cardHandle} />
         <View style={styles.mapBottomHeader}><View style={styles.mapBottomHeaderCopy}><Text style={styles.mapBottomTitle}>{circleName || 'Your circle'}</Text><Text style={styles.mapBottomSubtitle}>{circleName ? `${circleMembers.length} ${circleMembers.length === 1 ? 'member' : 'members'} \u00B7 ${circleConnected ? 'Connected' : 'Offline'}` : 'Your people will appear here'}</Text></View><Pressable style={styles.mapPanelArrow} onPress={onOpenCircle} accessibilityLabel="View circle"><Icon name="arrow-forward" size={19} color={COLORS.purple} /></Pressable></View>
-        {circleName ? <ScrollView style={styles.mapMemberScroll} showsVerticalScrollIndicator={false} nestedScrollEnabled><View style={styles.mapMemberList}>{circleMembers.map((member) => <Pressable key={member.id} style={styles.mapMemberRow} onPress={() => onOpenMember(member)}><MemberRowAvatar member={member} size={54} /><View style={styles.mapMemberCopy}><Text style={styles.mapMemberName} numberOfLines={1}>{member.name}</Text><Text style={styles.mapMemberStatus} numberOfLines={1}>{member.status}</Text><Text style={styles.mapMemberStatus} numberOfLines={1}>{member.lastSeen}</Text></View><Icon name="chevron-forward" size={17} color={COLORS.subtle} /></Pressable>)}</View></ScrollView> : <Pressable style={styles.mapEmptyCard} onPress={onCreateCircle}><Icon name="people-outline" size={23} color={COLORS.purple} /><View style={styles.mapEmptyCopy}><Text style={styles.mapEmptyTitle}>Start a private circle</Text><Text style={styles.mapEmptyText}>Create one to see members on the map.</Text></View><Icon name="arrow-forward" size={18} color={COLORS.purple} /></Pressable>}
+        {circleName ? <ScrollView style={styles.mapMemberScroll} showsVerticalScrollIndicator={false} nestedScrollEnabled><View style={styles.mapMemberList}>{circleMembers.map((member) => {
+          // Self rows show their current place and stay time on separate lines;
+          // other members keep their own status and last-seen labels.
+          const selfLine = member.isYou ? selfStatusLine({ locationEnabled, coordinate: isValidCoordinate(currentCoordinate) ? currentCoordinate : null, activity: member.movement?.activity ?? null, staySinceMs: selfStaySince, address: selfAddress, nowMs }) : null;
+          return <Pressable key={member.id} style={styles.mapMemberRow} onPress={() => onOpenMember(member)}><MemberRowAvatar member={member} size={54} /><View style={styles.mapMemberCopy}><Text style={styles.mapMemberName} numberOfLines={1}>{member.name}</Text><Text style={styles.mapMemberStatus} numberOfLines={1}>{selfLine?.status ?? member.status}</Text><Text style={styles.mapMemberStatus} numberOfLines={1}>{selfLine?.lastSeen ?? member.lastSeen}</Text></View><Icon name="chevron-forward" size={17} color={COLORS.subtle} /></Pressable>;})}</View></ScrollView> : <Pressable style={styles.mapEmptyCard} onPress={onCreateCircle}><Icon name="people-outline" size={23} color={COLORS.purple} /><View style={styles.mapEmptyCopy}><Text style={styles.mapEmptyTitle}>Start a private circle</Text><Text style={styles.mapEmptyText}>Create one to see members on the map.</Text></View><Icon name="arrow-forward" size={18} color={COLORS.purple} /></Pressable>}
       </View>
     </View>
   );
@@ -283,6 +298,13 @@ export default function App() {
   const watcher = useRef<Location.LocationSubscription | null>(null);
   const circleRef = useRef<CircleConfig | null>(null);
   const lastSharedTimestamp = useRef(0);
+  // Current-place stay for the "At ... since ..." row. A ref (not state)
+  // survives tab mounts; SecureStore persistence survives restarts. Live
+  // observation always wins over a stored stay (see rehydrate effect below).
+  const stayRef = useRef<StayState>(null);
+  const [selfStaySince, setSelfStaySince] = useState<number | null>(null);
+  const [selfAddress, setSelfAddress] = useState<string | null>(null);
+  const lastAddressBucket = useRef<string | null>(null);
 
   const shareLocation = useCallback((position: Location.LocationObject) => {
     // iOS may deliver fixes every second; cap foreground network updates at once per 5s.
@@ -292,6 +314,21 @@ export default function App() {
     const recordedAt = new Date(position.timestamp).toISOString();
     setCurrentCoordinate({ latitude: location.latitude, longitude: location.longitude });
     setCurrentMovement({ value: parseMovement(location), recordedAt });
+    // Stay start is the first fix observed at this place, never the latest
+    // update: updateStay keeps the original start inside GPS-noise tolerance
+    // and clears the stay while classified as moving.
+    const nextStay = updateStay(stayRef.current, {
+      latitude: location.latitude,
+      longitude: location.longitude,
+      timestamp: position.timestamp,
+      accuracy: typeof location.accuracy === 'number' ? location.accuracy : null,
+      moving: location.activity != null && location.activity !== 'stationary',
+    });
+    if (JSON.stringify(nextStay) !== JSON.stringify(stayRef.current)) {
+      stayRef.current = nextStay;
+      void secureStorage.setItemAsync(SELF_STAY_KEY, JSON.stringify(nextStay)).catch(() => {});
+    }
+    setSelfStaySince(nextStay?.sinceMs ?? null);
     const currentCircle = circleRef.current;
     if (currentCircle) void publishLocation(currentCircle, location, recordedAt).catch((error) => console.warn('[Free360] Foreground location queued:', error));
   }, []);
@@ -379,6 +416,54 @@ export default function App() {
   }, [toast]);
 
   useEffect(() => () => { watcher.current?.remove(); }, []);
+
+  useEffect(() => {
+    // Re-adopt the persisted stay only when no live fix got there first.
+    let live = true;
+    void secureStorage.getItemAsync(SELF_STAY_KEY).then((raw) => {
+      if (!live || stayRef.current || !raw) return;
+      const stay = parseStay(JSON.parse(raw));
+      if (stay) {
+        stayRef.current = stay;
+        setSelfStaySince(stay.sinceMs);
+      }
+    }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+
+  useEffect(() => {
+    // One lookup per address bucket; jitter inside the bucket is served from
+    // cache and superseded buckets are ignored when their lookup resolves.
+    if (!locationEnabled || !isValidCoordinate(currentCoordinate) || Platform.OS === 'web') return;
+    const coordinate = currentCoordinate;
+    // Drop the previous bucket's address the moment the bucket changes so a
+    // stale street never lingers while the new lookup is in flight.
+    if (addressBucket(coordinate) !== lastAddressBucket.current) {
+      lastAddressBucket.current = addressBucket(coordinate);
+      setSelfAddress(null);
+    }
+    let live = true;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const attempt = () => {
+      void selfAddressResolver.resolve(coordinate).then((text) => {
+        if (!live) return;
+        setSelfAddress((current) => (current === text ? current : text));
+        // Failures/empty results retry after the cooldown even while
+        // stationary: fixes may stop arriving, so the timer (not just the
+        // next fix) guarantees recovery. Success schedules nothing.
+        if (text == null) {
+          retryTimer = setTimeout(() => { if (live) attempt(); }, ADDRESS_FAILURE_RETRY_MS);
+        }
+      });
+    };
+    attempt();
+    // Cleanup on disable/unmount/bucket change: no more attempts, no late
+    // resolutions, no orphaned timers, no overlapping retries.
+    return () => {
+      live = false;
+      if (retryTimer !== null) clearTimeout(retryTimer);
+    };
+  }, [locationEnabled, currentCoordinate]);
 
   useEffect(() => {
     if (!locationEnabled || Platform.OS === 'web') return;
@@ -579,7 +664,7 @@ export default function App() {
   const content = (() => {
     const selfName = displayNameFor(profile.name, SELF_FALLBACK_NAME);
     const selfHeaderMember: Member = mapMembers.find((member) => member.isYou) ?? { id: 'you', name: selfName, initials: initialsForName(selfName), avatar: avatarForProfile(profile as { avatar?: unknown }), role: 'You', status: 'Sharing paused', lastSeen: 'No location yet', coordinate: null, color: COLORS.deepPurple, isYou: true, historyCount: 0 };
-    if (activeTab === 'map') return <MapScreen currentCoordinate={currentCoordinate} locationEnabled={locationEnabled} circleName={circle?.circleName ?? ''} circleMembers={mapMembers} circleConnected={circleConnected} selfHome={profile.home} trailMember={trailMember} trailCoordinates={trailCoordinates} isOwner={Boolean(circle?.isOwner)} onRequestLocation={requestLocation} onCheckIn={() => setCheckInVisible(true)} onOpenMember={setSelectedMember} onOpenCircle={() => router.replace('/circle')} onOpenSettings={() => router.replace('/you')} onInvite={invite} onCreateCircle={() => router.push('/create-circle')} onJoinCircle={() => router.push('/join')} onHideTrail={() => setTrailMemberId(null)} />;
+    if (activeTab === 'map') return <MapScreen currentCoordinate={currentCoordinate} locationEnabled={locationEnabled} circleName={circle?.circleName ?? ''} circleMembers={mapMembers} circleConnected={circleConnected} selfHome={profile.home} trailMember={trailMember} trailCoordinates={trailCoordinates} selfStaySince={selfStaySince} selfAddress={selfAddress} nowMs={now} isOwner={Boolean(circle?.isOwner)} onRequestLocation={requestLocation} onCheckIn={() => setCheckInVisible(true)} onOpenMember={setSelectedMember} onOpenCircle={() => router.replace('/circle')} onOpenSettings={() => router.replace('/you')} onInvite={invite} onCreateCircle={() => router.push('/create-circle')} onJoinCircle={() => router.push('/join')} onHideTrail={() => setTrailMemberId(null)} />;
     if (activeTab === 'circle') return <CircleScreen circleMembers={mapMembers} circle={circle} onInvite={invite} onCreateCircle={() => router.push('/create-circle')} onJoin={() => router.push('/join')} onOpenMember={setSelectedMember} />;
     if (activeTab === 'activity') return <ActivityScreen circle={circle} checkIns={checkIns} onCheckIn={() => setCheckInVisible(true)} />;
     return <YouScreen name={selfHeaderMember.name} avatar={selfHeaderMember.avatar ?? null} locationEnabled={locationEnabled} locationReady={locationReady} backgroundReady={backgroundReady} circleConnected={circleConnected} onToggleLocation={toggleLocation} circle={circle} onCircleSetup={() => router.push(circle ? '/circle' : '/create-circle')} onInvite={invite} onJoin={() => router.push('/join')} />;

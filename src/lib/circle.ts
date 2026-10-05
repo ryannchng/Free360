@@ -4,6 +4,7 @@ import { fromByteArray, toByteArray } from 'base64-js';
 import nacl from 'tweetnacl';
 import { FunctionsHttpError } from '@supabase/supabase-js';
 import { getBackendUrl, isSelfHosted } from './backend';
+import { getBackendSettings, initializeBackendSettings, saveBackendSettings, validateBackendSettings, type BackendSettings } from './backend-settings';
 import { claimSelfHostedInvite, createSelfHostedCircle, createSelfHostedInvite, ensureSelfHostedSession, fetchSelfHostedHistory, fetchSelfHostedSnapshots, isSelfHostedMember, publishSelfHostedEnvelope, subscribeSelfHosted } from './self-hosted';
 import { ensureDeviceSession, getSupabase } from './supabase';
 import { normalizeSetupCode } from './setup-code';
@@ -31,6 +32,7 @@ export type CircleConfig = {
 
 export type InvitePayload = {
   version: 2;
+  connection?: BackendSettings;
   projectUrl: string;
   circleId: string;
   inviteId: string;
@@ -99,7 +101,7 @@ function requireString(value: unknown, label: string) {
 }
 
 function requireProject(projectUrl: string) {
-  if (projectUrl !== getBackendUrl()) throw new Error('This invitation belongs to another Free360 group server. Install the app build configured for that group.');
+  if (projectUrl !== getBackendUrl()) throw new Error('This invitation belongs to another Free360 group server. Connect to the same server before joining.');
 }
 
 function ensureBackendSession() {
@@ -136,6 +138,7 @@ export function encodeInvite(payload: InvitePayload) {
 }
 
 export function decodeInvite(value: string): InvitePayload {
+  if (value.length > 12000) throw new Error('This invitation QR code is too large.');
   const match = value.trim().match(/^free360:\/\/invite\/([A-Za-z0-9_-]+)$/);
   if (!match) throw new Error('This is not a Free360 invitation QR code.');
   let parsed: unknown;
@@ -145,6 +148,7 @@ export function decodeInvite(value: string): InvitePayload {
   const invite: InvitePayload = {
     version: 2,
     projectUrl: requireString(parsed.projectUrl, 'project URL'),
+    connection: parsed.connection === undefined ? undefined : validateBackendSettings(parsed.connection),
     circleId: requireString(parsed.circleId, 'circle ID'),
     inviteId: requireString(parsed.inviteId, 'invite ID'),
     inviteSecret: requireString(parsed.inviteSecret, 'invite secret'),
@@ -152,11 +156,18 @@ export function decodeInvite(value: string): InvitePayload {
     circleName: requireString(parsed.circleName, 'circle name'),
   };
   getKey(invite.encryptionKey);
-  requireProject(invite.projectUrl);
+  if (invite.connection) {
+    if (invite.connection.url !== invite.projectUrl) throw new Error('Invitation server settings do not match its circle.');
+  } else {
+    if (!getBackendSettings()) throw new Error('This older invitation does not include server settings. Ask the owner to update Free360 and generate a new QR.');
+    requireProject(invite.projectUrl);
+  }
   return invite;
 }
 
 export async function createCircle(circleName: string, setupCode: string): Promise<CircleConfig> {
+  await initializeBackendSettings();
+  if (await loadCircle()) throw new Error('This phone already belongs to a circle.');
   const name = circleName.trim();
   if (!name) throw new Error('Enter a circle name.');
   const deviceId = await ensureBackendSession();
@@ -238,14 +249,24 @@ export async function createInvite(config: CircleConfig) {
     expiresAt = String(data);
   }
   const payload: InvitePayload = {
-    version: 2, projectUrl: config.projectUrl, circleId: config.circleId, inviteId, inviteSecret,
+    version: 2, connection: getBackendSettings()!, projectUrl: config.projectUrl, circleId: config.circleId, inviteId, inviteSecret,
     encryptionKey: config.encryptionKey, circleName: config.circleName,
   };
   return { qrValue: encodeInvite(payload), expiresAt };
 }
 
 export async function joinCircle(qrValue: string): Promise<CircleConfig> {
+  await initializeBackendSettings();
+  if (await loadCircle()) throw new Error('This phone already belongs to a circle.');
   const invite = decodeInvite(qrValue);
+  const stored = await SecureStore.getItemAsync(CIRCLE_STORAGE_KEY);
+  if (stored) {
+    const existing = JSON.parse(stored);
+    if (!existing.pending || existing.circleId !== invite.circleId || existing.projectUrl !== invite.projectUrl) {
+      throw new Error('This phone already has a circle or a pending invitation. Retry its original invitation.');
+    }
+  }
+  if (invite.connection) await saveBackendSettings(invite.connection);
   const deviceId = await ensureBackendSession();
   const config: CircleConfig = {
     version: 2, circleId: invite.circleId, deviceId, encryptionKey: invite.encryptionKey,
@@ -535,6 +556,7 @@ export function subscribeToCircle(config: CircleConfig, onUpdate: (update: Circl
 
 let circleStorageMigrated = false;
 export async function loadCircle() {
+  await initializeBackendSettings();
   const raw = await SecureStore.getItemAsync(CIRCLE_STORAGE_KEY);
   if (!raw) return null;
   try {
