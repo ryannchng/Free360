@@ -7,8 +7,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Alert,
+  Animated,
+  Easing,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
+  type PanResponderInstance,
   Platform,
   Pressable,
   ScrollView,
@@ -21,6 +25,7 @@ import {
 import { MemberAvatar } from './src/components/MemberAvatar';
 import { OpenStreetMap, type OpenStreetMapHandle, type MapMember } from './src/components/OpenStreetMap';
 import { avatarForProfile, displayNameFor, initialsForName } from './src/lib/member-display';
+import { clampMemberSheetHeight, nextMemberSheetExpanded, resolveMemberSheetHeights } from './src/lib/member-sheet';
 import { isValidCoordinate, resolveMapCenter } from './src/lib/map-region';
 import { BACKGROUND_LOCATION_TASK } from './src/lib/background-location';
 import { type CheckIn, type CircleConfig, type CircleSnapshot, fetchCircleSnapshots, fetchLocationHistory, type HistoryPoint, loadCircle, publishCheckIn, publishLocation, publishPaused, subscribeToCircle } from './src/lib/circle';
@@ -76,6 +81,20 @@ function ageLabel(recordedAt: string, now: number) {
   return `Updated ${Math.floor(minutes / 60)} hr ago`;
 }
 
+// Map header subtitle reuses the existing member.lastSeen value without
+// duplicating its prefix: "Updated 5 min ago" becomes "Last updated 5 min
+// ago"; non-time values ("On this device", "No live location", "") are
+// returned as-is so the header never reads "Last updated On this device".
+function memberHeaderSubtitle(lastSeen: string) {
+  const trimmed = lastSeen.trim();
+  if (!trimmed) return 'Last updated —';
+  const updated = trimmed.match(/^(?:last\s+updated|updated)\s+(.+)$/i);
+  if (updated) return `Last updated ${updated[1]}`;
+  const seen = trimmed.match(/^last\s+seen\s+(.+)$/i);
+  if (seen) return `Last updated ${seen[1]}`;
+  return trimmed;
+}
+
 function Icon({ name, size = 21, color = COLORS.ink }: { name: IconName; size?: number; color?: string }) {
   return <Ionicons name={name} size={size} color={color} />;
 }
@@ -123,7 +142,7 @@ function Header({ circleName, selfMember, onSettings }: { circleName: string; se
   );
 }
 
-function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembers, circleConnected, selfHome, trailMember, trailCoordinates, selfStaySince, selfAddress, nowMs, onRequestLocation, onCheckIn, onOpenMember, onOpenCircle, onOpenSettings, onInvite, onCreateCircle, onJoinCircle, onHideTrail, isOwner }: { currentCoordinate: { latitude: number; longitude: number } | null; locationEnabled: boolean; circleName: string; circleMembers: Member[]; circleConnected: boolean; selfHome: Home | null; trailMember: Member | null; trailCoordinates: { latitude: number; longitude: number }[]; selfStaySince: number | null; selfAddress: string | null; nowMs: number; onRequestLocation: () => void; onCheckIn: () => void; onOpenMember: (member: Member) => void; onOpenCircle: () => void; onOpenSettings: () => void; onInvite: () => void; onCreateCircle: () => void; onJoinCircle: () => void; onHideTrail: () => void; isOwner: boolean }) {
+function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembers, circleConnected, selfHome, trailMember, trailCoordinates, selfStaySince, selfAddress, nowMs, selectedMember, selectedHistory, onRequestLocation, onCheckIn, onOpenMember, onOpenCircle, onOpenSettings, onInvite, onCreateCircle, onJoinCircle, onHideTrail, onCloseMember, onRefreshMember, onShowTrail, isOwner }: { currentCoordinate: { latitude: number; longitude: number } | null; locationEnabled: boolean; circleName: string; circleMembers: Member[]; circleConnected: boolean; selfHome: Home | null; trailMember: Member | null; trailCoordinates: { latitude: number; longitude: number }[]; selfStaySince: number | null; selfAddress: string | null; nowMs: number; selectedMember: Member | null; selectedHistory: HistoryPoint[]; onRequestLocation: () => void; onCheckIn: () => void; onOpenMember: (member: Member) => void; onOpenCircle: () => void; onOpenSettings: () => void; onInvite: () => void; onCreateCircle: () => void; onJoinCircle: () => void; onHideTrail: () => void; onCloseMember: () => void; onRefreshMember: () => void; onShowTrail: (member: Member) => void; isOwner: boolean }) {
   const mapRef = useRef<OpenStreetMapHandle>(null);
   // Derive the empty-state flag purely from already-available values: live device
   // location (only when sharing), then the first valid shared member location,
@@ -158,16 +177,18 @@ function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembe
     return [{ id: member.id, coordinate, name: member.name, initials: member.initials, avatar: member.avatar ?? null, color: member.color, stale: !!member.isStale, battery: member.battery, movement: badge, description: `${movement.label} · ${movement.speed}` }];
   });
 
+  const [containerHeight, setContainerHeight] = useState(0);
+
   return (
-    <View style={styles.mapScreen}>
+    <View style={styles.mapScreen} onLayout={({ nativeEvent }) => { const next = nativeEvent.layout.height; setContainerHeight((prev) => (Math.abs(prev - next) > 1 ? next : prev)); }}>
       <OpenStreetMap ref={mapRef} data={{ members: mapMembers, homes: circleMembers.filter(member => isValidCoordinate(member.home)).map(member => ({ coordinate: member.home!, name: member.name })), trail: validTrail, trailColor: trailMember?.color ?? COLORS.purple }} onOpenMember={id => { const member = circleMembers.find(member => member.id === id); if (member) onOpenMember(member); }} />
       {!hasRealLocation && <View style={[styles.mapEmptyOverlay, { top: 132 + topInset }]} pointerEvents="none"><Icon name={circleName ? 'location-outline' : 'people-outline'} size={16} color={COLORS.deepPurple} /><Text style={styles.mapEmptyOverlayText}>{circleName ? 'No shared locations yet — map stays visible' : 'Start a private circle to see locations'}</Text></View>}
 
-      <View style={[styles.mapTopBar, { top: 12 + topInset }]}>
+      {selectedMember ? <View style={[styles.mapMemberHeader, { top: 12 + topInset }]} accessible accessibilityLabel={`${selectedMember.name}, ${memberHeaderSubtitle(selectedMember.lastSeen)}`}><Pressable style={styles.mapMemberBack} hitSlop={8} onPress={onCloseMember} accessibilityLabel="Back"><Icon name="chevron-back" size={24} color={COLORS.deepPurple} /></Pressable><View style={styles.mapMemberHeaderCopy}><Text style={styles.mapMemberHeaderName} numberOfLines={1}>{selectedMember.name}</Text><Text style={styles.mapMemberHeaderSubtitle} numberOfLines={1}>{memberHeaderSubtitle(selectedMember.lastSeen)}</Text></View><Pressable style={styles.mapMemberRefresh} hitSlop={8} onPress={onRefreshMember} accessibilityLabel="Refresh location"><Icon name="refresh" size={20} color={COLORS.white} /></Pressable></View> : <View style={[styles.mapTopBar, { top: 12 + topInset }]}>
         <Pressable style={styles.mapRoundButton} hitSlop={4} onPress={onOpenSettings} accessibilityLabel="Open settings"><Icon name="settings-outline" size={23} color={COLORS.purple} /></Pressable>
         <Pressable style={styles.mapCirclePicker} hitSlop={2} onPress={onOpenCircle} accessibilityLabel="Open circle"><Text style={styles.mapCirclePickerText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{circleName || 'Your circle'}</Text><Icon name="chevron-down" size={18} color={COLORS.purple} /></Pressable>
         <Pressable style={styles.mapRoundButton} hitSlop={4} onPress={isOwner || !circleName ? onInvite : onOpenCircle} accessibilityLabel={isOwner || !circleName ? 'Invite a member' : 'View circle'}><Icon name={isOwner || !circleName ? 'person-add-outline' : 'people-outline'} size={22} color={COLORS.purple} /></Pressable>
-      </View>
+      </View>}
 
       <View style={[styles.mapTopOverlay, { top: 73 + topInset }]}>
         <View style={styles.safePill}><View style={[styles.safeIcon, { backgroundColor: circleConnected ? COLORS.purpleSoft : COLORS.yellowSoft }]}><Icon name={circleConnected ? 'cloud-done-outline' : 'cloud-offline-outline'} size={16} color={circleConnected ? COLORS.purple : COLORS.yellow} /></View><View><Text style={styles.safePillLabel}>{!circleName ? 'NO CIRCLE YET' : circleConnected ? 'CIRCLE CONNECTED' : 'CIRCLE OFFLINE'}</Text><Text style={styles.safePillValue}>{!circleName ? 'Create or join a circle to begin' : circleMembers.some((member) => member.isStale) ? 'Some locations are stale' : circleConnected ? 'Locations are not safety alerts' : 'Updates may be delayed'}</Text></View></View>
@@ -182,7 +203,7 @@ function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembe
         <Pressable style={styles.mapActionButton} onPress={action}><Icon name={actionIcon} size={20} color={COLORS.purple} /><Text style={styles.mapActionText}>{actionLabel}</Text></Pressable>
       </View>
 
-      <View style={styles.mapBottomCard}>
+{selectedMember ? <MapMemberSheet key={selectedMember.id} member={selectedMember} history={selectedHistory} onShowTrail={onShowTrail} containerHeight={containerHeight} topInset={topInset} /> :       <View style={styles.mapBottomCard}>
         <View style={styles.cardHandle} />
         <View style={styles.mapBottomHeader}><View style={styles.mapBottomHeaderCopy}><Text style={styles.mapBottomTitle}>{circleName || 'Your circle'}</Text><Text style={styles.mapBottomSubtitle}>{circleName ? `${circleMembers.length} ${circleMembers.length === 1 ? 'member' : 'members'} \u00B7 ${circleConnected ? 'Connected' : 'Offline'}` : 'Your people will appear here'}</Text></View><Pressable style={styles.mapPanelArrow} onPress={onOpenCircle} accessibilityLabel="View circle"><Icon name="arrow-forward" size={19} color={COLORS.purple} /></Pressable></View>
         {circleName ? <ScrollView style={styles.mapMemberScroll} showsVerticalScrollIndicator={false} nestedScrollEnabled><View style={styles.mapMemberList}>{circleMembers.map((member) => {
@@ -190,7 +211,7 @@ function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembe
           // other members keep their own status and last-seen labels.
           const selfLine = member.isYou ? selfStatusLine({ locationEnabled, coordinate: isValidCoordinate(currentCoordinate) ? currentCoordinate : null, activity: member.movement?.activity ?? null, staySinceMs: selfStaySince, address: selfAddress, nowMs }) : null;
           return <Pressable key={member.id} style={styles.mapMemberRow} onPress={() => onOpenMember(member)}><MemberRowAvatar member={member} size={54} /><View style={styles.mapMemberCopy}><Text style={styles.mapMemberName} numberOfLines={1}>{member.name}</Text><Text style={styles.mapMemberStatus} numberOfLines={1}>{selfLine?.status ?? member.status}</Text><Text style={styles.mapMemberStatus} numberOfLines={1}>{selfLine?.lastSeen ?? member.lastSeen}</Text></View><Icon name="chevron-forward" size={17} color={COLORS.subtle} /></Pressable>;})}</View></ScrollView> : <Pressable style={styles.mapEmptyCard} onPress={onCreateCircle}><Icon name="people-outline" size={23} color={COLORS.purple} /><View style={styles.mapEmptyCopy}><Text style={styles.mapEmptyTitle}>Start a private circle</Text><Text style={styles.mapEmptyText}>Create one to see members on the map.</Text></View><Icon name="arrow-forward" size={18} color={COLORS.purple} /></Pressable>}
-      </View>
+      </View>}
     </View>
   );
 }
@@ -266,9 +287,154 @@ function CheckInModal({ visible, onClose, onConfirm }: { visible: boolean; onClo
   return <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}><KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}><Pressable style={styles.modalDismissArea} onPress={onClose} /><View style={styles.checkInSheet}><View style={styles.sheetHandle} /><View style={styles.sheetIcon}><Icon name="checkmark-circle" size={32} color={COLORS.mint} /></View><Text style={styles.sheetTitle}>Check in with your circle</Text><Text style={styles.sheetBody}>Send an encrypted check-in. Add a note if you want to.</Text><TextInput value={message} onChangeText={setMessage} style={styles.messageInput} placeholder="Optional note" placeholderTextColor={COLORS.subtle} multiline /><Pressable style={styles.confirmCheckIn} onPress={() => onConfirm(message)}><Text style={styles.confirmCheckInText}>Send check-in</Text><Icon name="arrow-forward" size={18} color={COLORS.white} /></Pressable><Pressable style={styles.cancelButton} onPress={onClose}><Text style={styles.cancelButtonText}>Not now</Text></Pressable></View></KeyboardAvoidingView></Modal>;
 }
 
-function MemberModal({ member, onClose, onShowTrail }: { member: Member | null; onClose: () => void; onShowTrail: (member: Member) => void }) {
+function MemberSheetBody({ member, history, onShowTrail, avatarScale }: { member: Member; history: HistoryPoint[]; onShowTrail: (member: Member) => void; avatarScale?: Animated.AnimatedInterpolation<number> }) {
+  // Shared sheet body (map + non-map modal): reuses existing member fields
+  // (name, status, lastSeen, battery, isPaused/isStale, historyCount,
+  // movement) plus already-loaded `history` points. No new fetching, state,
+  // navigation, or invented actions/data. Drag state lives in MapMemberSheet
+  // (map tab only); the modal path below keeps its static handle.
+  const sharing = !member.isPaused && !member.isStale;
+  const batteryLow = member.battery != null && member.battery <= 20;
+  const avatar = <View style={styles.memberAvatarOverlap}><View style={styles.memberAvatarRing}><MemberAvatar name={member.name} initials={member.initials} avatar={member.avatar ?? null} color={member.color} size={88} /></View></View>;
+  return <>{avatarScale ? <Animated.View style={{ transform: [{ scale: avatarScale }] }}>{avatar}</Animated.View> : avatar}<ScrollView style={styles.memberSheetScroll} contentContainerStyle={styles.memberSheetScrollContent} showsVerticalScrollIndicator={false}><View style={styles.memberSheetHeader}><View style={styles.memberDetailNameRow}><Text style={styles.memberSheetName} numberOfLines={2}>{member.name}</Text><View style={[styles.memberOnlineDot, !sharing && styles.memberOnlineDotOff]} accessibilityLabel={sharing ? 'Sharing' : 'Not sharing'} /></View>{member.battery != null && <View style={styles.memberBatteryPill}><Icon name="battery-half" size={15} color={batteryLow ? COLORS.batteryOrange : COLORS.mint} /><Text style={styles.memberBatteryText}>{member.battery}%</Text></View>}</View><Text style={styles.memberStreetTime} numberOfLines={2}>{member.status} · {member.lastSeen}</Text><View style={styles.memberDetailGrid}><DetailStat icon="location" label="Sharing" value={member.status} /><DetailStat icon="time-outline" label="Last update" value={member.lastSeen} />{!isStationaryMovement(member.movement) && <DetailStat icon={movementDisplay(member).icon} label={movementDisplay(member).label} value={movementDisplay(member).speed} />}<DetailStat icon="footsteps" label="Past 24h" value={member.historyCount ? `${member.historyCount} trail points` : 'No trail yet'} /></View><MemberHistoryTimeline history={history} /></ScrollView>{member.historyCount > 0 && <View style={styles.memberStickyFade}><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.memberStickyRow}><Pressable style={styles.memberTrailPill} onPress={() => onShowTrail(member)}><Icon name="footsteps" size={18} color={COLORS.deepPurple} /><Text style={styles.memberTrailPillText}>Show 24-hour trail on map</Text><Icon name="arrow-forward" size={17} color={COLORS.deepPurple} /></Pressable></ScrollView></View>}</>;
+}
+
+function MemberSheetContent({ member, history, onShowTrail, sheetStyle }: { member: Member; history: HistoryPoint[]; onShowTrail: (member: Member) => void; sheetStyle?: object }) {
+  // Non-map modal path: static sheet (visual handle only, existing scroll +
+  // trail press). No back button here: the caller owns close semantics.
+  return <View style={sheetStyle ?? styles.memberSheet}><View style={styles.memberSheetHandle} accessible={false} /><MemberSheetBody member={member} history={history} onShowTrail={onShowTrail} /></View>;
+}
+
+
+function MemberModal({ member, history, onClose, onShowTrail }: { member: Member | null; history: HistoryPoint[]; onClose: () => void; onShowTrail: (member: Member) => void }) {
+  // Non-map tabs only: native Modal is fine here because no map is exposed
+  // behind it. The map tab renders MemberSheetContent in place (see
+  // MapScreen) so pan/drag stay interactive. Backdrop tap keeps existing
+  // close semantics.
   if (!member) return null;
-  return <Modal visible={Boolean(member)} transparent animationType="slide" onRequestClose={onClose}><View style={styles.modalBackdrop}><Pressable style={styles.modalDismissArea} onPress={onClose} /><View style={styles.memberSheet}><View style={styles.sheetHandle} /><View style={styles.memberSheetHeader}><MemberAvatar name={member.name} initials={member.initials} avatar={member.avatar ?? null} color={member.color} size={60} /><View style={styles.memberSheetCopy}><Text style={styles.sheetTitle}>{member.name}</Text><Text style={styles.memberSheetRole}>{member.role} · {member.status}</Text></View><Pressable style={styles.modalClose} onPress={onClose} hitSlop={8}><Icon name="close" size={22} color={COLORS.muted} /></Pressable></View><View style={styles.memberDetailGrid}><DetailStat icon="location" label="Sharing" value={member.status} /><DetailStat icon="time-outline" label="Last update" value={member.lastSeen} />{!isStationaryMovement(member.movement) && <DetailStat icon={movementDisplay(member).icon} label={movementDisplay(member).label} value={movementDisplay(member).speed} />}<DetailStat icon="footsteps" label="Past 24h" value={member.historyCount ? `${member.historyCount} trail points` : 'No trail yet'} /></View>{member.historyCount > 0 && <Pressable style={styles.trailButton} onPress={() => onShowTrail(member)}><Icon name="footsteps" size={18} color={COLORS.white} /><Text style={styles.trailButtonText}>Show 24-hour trail on map</Text><Icon name="arrow-forward" size={17} color={COLORS.white} /></Pressable>}</View></View></Modal>;
+  return <Modal visible={Boolean(member)} transparent animationType="slide" onRequestClose={onClose}><View style={styles.modalBackdrop}><Pressable style={styles.modalDismissArea} onPress={onClose} /><MemberSheetContent member={member} history={history} onShowTrail={onShowTrail} /></View></Modal>;
+}
+
+
+function MapMemberSheet({ member, history, onShowTrail, containerHeight, topInset }: { member: Member; history: HistoryPoint[]; onShowTrail: (member: Member) => void; containerHeight: number; topInset: number }) {
+  // Draggable map sheet: handle-drag up expands, down snaps back to the ~52%
+  // rest height with a smooth Animated.timing snap. Height/radius/margins are
+  // layout props so useNativeDriver stays false (the native driver omits
+  // layout). Gesture capture is handle-only: the timeline ScrollView keeps
+  // its own scrolling and the exposed map stays pannable (no full-screen
+  // touch blocker). Down-drag never dismisses; close stays on the header
+  // back button. Callers remount per member (key={member.id}) so a newly
+  // opened member always rests collapsed.
+  const { collapsed, expanded } = useMemo(() => resolveMemberSheetHeights(containerHeight, topInset), [containerHeight, topInset]);
+  const measured = containerHeight > 0 && collapsed > 0;
+  const canExpand = measured && expanded > collapsed;
+  const [isExpanded, setIsExpanded] = useState(false);
+  // Stable lazy state (not refs): the refs rule forbids reading ref values
+  // during render, and height/panResponder flow into JSX output below.
+  // Mutable gesture bookkeeping stays in refs synced via effects/handlers.
+  const [height] = useState(() => new Animated.Value(0));
+  const currentHeight = useRef(0);
+  const baseline = useRef(0);
+  const expandedRef = useRef(false);
+  const snapsRef = useRef({ collapsed, expanded });
+  const animRef = useRef<Animated.CompositeAnimation | null>(null);
+
+  // Keep gesture callbacks on fresh snap bounds without touching refs render.
+  useEffect(() => {
+    snapsRef.current = { collapsed, expanded };
+  }, [collapsed, expanded]);
+
+  // Adopt measured heights (first layout, rotation): stop any flight and rest
+  // at the current snap so bounds always match the real container.
+  useEffect(() => {
+    if (!measured) return;
+    animRef.current?.stop();
+    animRef.current = null;
+    const target = expandedRef.current && canExpand ? expanded : collapsed;
+    baseline.current = target;
+    currentHeight.current = target;
+    height.setValue(target);
+  }, [collapsed, expanded, measured, canExpand, height]);
+  // Track the live animated value so a mid-flight re-grab uses the true
+  // visual baseline instead of a stale snap (avoids height jumps).
+  useEffect(() => {
+    const id = height.addListener(({ value }) => { currentHeight.current = value; });
+    return () => { height.removeListener(id); };
+  }, [height]);
+  useEffect(() => () => { animRef.current?.stop(); }, []);
+
+  const snapTo = useCallback((expand: boolean) => {
+    const snaps = snapsRef.current;
+    const targetExpanded = expand && snaps.expanded > snaps.collapsed;
+    const target = targetExpanded ? snaps.expanded : snaps.collapsed;
+    expandedRef.current = targetExpanded;
+    setIsExpanded(targetExpanded);
+    baseline.current = target;
+    animRef.current?.stop();
+    const anim = Animated.timing(height, { toValue: target, duration: 240, easing: Easing.out(Easing.cubic), useNativeDriver: false });
+    animRef.current = anim;
+    anim.start(({ finished }) => { if (finished && animRef.current === anim) animRef.current = null; });
+  }, [height]);
+
+  // Created in an effect (not render): a lazy-state initializer counts as
+  // render-time to the refs rule, which would flag the ref reads inside the
+  // deferred gesture callbacks. snapTo/height are stable so this runs once;
+  // handlers stay fresh through effect-synced refs.
+  const [panResponder, setPanResponder] = useState<PanResponderInstance | null>(null);
+  useEffect(() => {
+    setPanResponder(PanResponder.create({
+    // Tap is left to the toggle button (no capture on press down); only a
+    // vertical move beyond slop becomes a sheet drag, so horizontal movement
+    // and taps never hijack touches.
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 6 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+    onPanResponderGrant: () => {
+      // Interrupt any snap flight; drag continues from the live height.
+      animRef.current?.stop();
+      animRef.current = null;
+      baseline.current = currentHeight.current;
+    },
+    onPanResponderMove: (_, gestureState) => {
+      const snaps = snapsRef.current;
+      height.setValue(clampMemberSheetHeight(baseline.current - gestureState.dy, snaps.collapsed, snaps.expanded));
+    },
+    onPanResponderTerminationRequest: () => true,
+    onPanResponderRelease: (_, gestureState) => {
+      snapTo(nextMemberSheetExpanded({ expanded: expandedRef.current, dragDy: gestureState.dy, velocityY: gestureState.vy }));
+    },
+    // A stolen responder (e.g. system interruption) springs back to the start
+    // snap instead of stranding the sheet mid-drag; never dismisses.
+    onPanResponderTerminate: () => {
+      snapTo(expandedRef.current);
+    },
+    }));
+  }, [height, snapTo]);
+
+  const toggleLabel = isExpanded ? 'Collapse member details' : 'Expand member details';
+  const handleLabel = `Member details, ${isExpanded ? 'expanded' : 'collapsed'}.`;
+
+  if (!canExpand) {
+    // Unmeasured or degenerate container: static partial sheet (same content,
+    // sticky trail action, scrolling timeline) with no drag offered.
+    return <View style={styles.mapMemberSheet}><View style={styles.memberSheetHandle} accessible={false} /><MemberSheetBody member={member} history={history} onShowTrail={onShowTrail} /></View>;
+  }
+
+  // Progress drives corners/margins/avatar together off the same height value
+  // so the sheet visually settles as one motion (no separate state to drift).
+  const progress = height.interpolate({ inputRange: [collapsed, expanded], outputRange: [0, 1], extrapolate: 'clamp' });
+  const edge = progress.interpolate({ inputRange: [0, 1], outputRange: [12, 0] });
+  const topRadius = progress.interpolate({ inputRange: [0, 1], outputRange: [RADII.sheetLarge, 24] });
+  const avatarScale = progress.interpolate({ inputRange: [0, 1], outputRange: [1, 0.82] });
+
+  return <Animated.View style={[styles.mapMemberSheetBase, { height, left: edge, right: edge, borderTopLeftRadius: topRadius, borderTopRightRadius: topRadius }]}><View style={styles.mapMemberHandleRow}><View style={styles.mapMemberHandleHit} {...(panResponder?.panHandlers ?? {})} accessible accessibilityRole="adjustable" accessibilityLabel={handleLabel} accessibilityHint="Drag up to expand, drag down to collapse." accessibilityActions={[{ name: 'expand', label: 'Expand details' }, { name: 'collapse', label: 'Collapse details' }]} onAccessibilityAction={(event) => { if (event.nativeEvent.actionName === 'expand') snapTo(true); else if (event.nativeEvent.actionName === 'collapse') snapTo(false); }}><View style={styles.mapMemberHandleBar} /></View><Pressable style={styles.mapMemberToggle} onPress={() => snapTo(!expandedRef.current)} accessibilityRole="button" accessibilityLabel={toggleLabel} accessibilityHint="Toggles the member sheet between half and expanded height."><Icon name={isExpanded ? 'chevron-down' : 'chevron-up'} size={20} color={COLORS.purple} /></Pressable></View><MemberSheetBody member={member} history={history} onShowTrail={onShowTrail} avatarScale={avatarScale} /></Animated.View>;
+}
+
+function MemberHistoryTimeline({ history }: { history: HistoryPoint[] }) {
+  // Renders only already-loaded points ({ latitude, longitude, recordedAt });
+  // newest first for readability. Coordinates shown as-is when no address
+  // exists; nothing is fabricated (no addresses, statuses, or distances).
+  const newestFirst = [...history].reverse();
+  return <View style={styles.memberHistoryCard} accessible accessibilityLabel={history.length ? `Past 24-hour trail, ${history.length} saved points` : 'Past 24-hour trail, no points yet'}><Text style={styles.memberHistoryTitle}>Past 24-hour trail</Text><Text style={styles.memberHistorySubtitle}>{history.length ? `${history.length} saved ${history.length === 1 ? 'point' : 'points'}` : 'No trail yet'}</Text>{newestFirst.map((point, index) => <View key={`${point.recordedAt}-${index}`} style={styles.memberHistoryRow}><View style={styles.memberHistoryDot} /><View style={styles.memberHistoryCopy}><Text style={styles.memberHistoryTime}>{new Date(point.recordedAt).toLocaleString()}</Text><Text style={styles.memberHistoryCoords}>{point.latitude.toFixed(5)}, {point.longitude.toFixed(5)}</Text></View></View>)}</View>;
 }
 
 function DetailStat({ icon, label, value }: { icon: IconName; label: string; value: string }) {
@@ -661,10 +827,17 @@ export default function App() {
     }
   };
 
+  const liveSelectedMember = selectedMember ? mapMembers.find((member) => member.id === selectedMember.id) ?? selectedMember : null;
+  // Already-loaded trail for the selected member only: same id→deviceId mapping
+  // as the map trail (self 'you' lives under circle.deviceId). No new fetching.
+  const selectedHistory = liveSelectedMember && circle ? (locationHistory[liveSelectedMember.id === 'you' ? circle.deviceId : liveSelectedMember.id] ?? []) : [];
   const content = (() => {
     const selfName = displayNameFor(profile.name, SELF_FALLBACK_NAME);
     const selfHeaderMember: Member = mapMembers.find((member) => member.isYou) ?? { id: 'you', name: selfName, initials: initialsForName(selfName), avatar: avatarForProfile(profile as { avatar?: unknown }), role: 'You', status: 'Sharing paused', lastSeen: 'No location yet', coordinate: null, color: COLORS.deepPurple, isYou: true, historyCount: 0 };
-    if (activeTab === 'map') return <MapScreen currentCoordinate={currentCoordinate} locationEnabled={locationEnabled} circleName={circle?.circleName ?? ''} circleMembers={mapMembers} circleConnected={circleConnected} selfHome={profile.home} trailMember={trailMember} trailCoordinates={trailCoordinates} selfStaySince={selfStaySince} selfAddress={selfAddress} nowMs={now} isOwner={Boolean(circle?.isOwner)} onRequestLocation={requestLocation} onCheckIn={() => setCheckInVisible(true)} onOpenMember={setSelectedMember} onOpenCircle={() => router.replace('/circle')} onOpenSettings={() => router.replace('/you')} onInvite={invite} onCreateCircle={() => router.push('/create-circle')} onJoinCircle={() => router.push('/join')} onHideTrail={() => setTrailMemberId(null)} />;
+    // Map tab hosts the member sheet in place (non-modal) so the map stays
+    // interactive: refresh reuses the existing snapshot read
+    // (refreshCircleData) and never publishes the member's position.
+    if (activeTab === 'map') return <MapScreen currentCoordinate={currentCoordinate} locationEnabled={locationEnabled} circleName={circle?.circleName ?? ''} circleMembers={mapMembers} circleConnected={circleConnected} selfHome={profile.home} trailMember={trailMember} trailCoordinates={trailCoordinates} selfStaySince={selfStaySince} selfAddress={selfAddress} nowMs={now} selectedMember={liveSelectedMember} selectedHistory={selectedHistory} isOwner={Boolean(circle?.isOwner)} onRequestLocation={requestLocation} onCheckIn={() => setCheckInVisible(true)} onOpenMember={setSelectedMember} onOpenCircle={() => router.replace('/circle')} onOpenSettings={() => router.replace('/you')} onInvite={invite} onCreateCircle={() => router.push('/create-circle')} onJoinCircle={() => router.push('/join')} onHideTrail={() => setTrailMemberId(null)} onCloseMember={() => setSelectedMember(null)} onRefreshMember={() => { void refreshCircleData(); }} onShowTrail={showTrail} />;
     if (activeTab === 'circle') return <CircleScreen circleMembers={mapMembers} circle={circle} onInvite={invite} onCreateCircle={() => router.push('/create-circle')} onJoin={() => router.push('/join')} onOpenMember={setSelectedMember} />;
     if (activeTab === 'activity') return <ActivityScreen circle={circle} checkIns={checkIns} onCheckIn={() => setCheckInVisible(true)} />;
     return <YouScreen name={selfHeaderMember.name} avatar={selfHeaderMember.avatar ?? null} locationEnabled={locationEnabled} locationReady={locationReady} backgroundReady={backgroundReady} circleConnected={circleConnected} onToggleLocation={toggleLocation} circle={circle} onCircleSetup={() => router.push(circle ? '/circle' : '/create-circle')} onInvite={invite} onJoin={() => router.push('/join')} />;
@@ -672,9 +845,7 @@ export default function App() {
 
   const headerSelfName = displayNameFor(profile.name, SELF_FALLBACK_NAME);
   const headerSelf: Member = mapMembers.find((member) => member.isYou) ?? { id: 'you', name: headerSelfName, initials: initialsForName(headerSelfName), avatar: avatarForProfile(profile as { avatar?: unknown }), role: 'You', status: 'Sharing paused', lastSeen: 'No location yet', coordinate: null, color: COLORS.deepPurple, isYou: true, historyCount: 0 };
-  const liveSelectedMember = selectedMember ? mapMembers.find((member) => member.id === selectedMember.id) ?? selectedMember : null;
-
-  return <SafeAreaView edges={activeTab === 'map' ? ['bottom', 'left', 'right'] : undefined} style={[styles.appRoot, activeTab === 'map' && styles.mapAppRoot]}><StatusBar style="dark" />{activeTab !== 'map' && <Header circleName={circle?.circleName ?? 'No circle'} selfMember={headerSelf} onSettings={() => router.replace('/you')} />}<View style={styles.mainContent}>{content}</View><BottomTabs activeTab={activeTab} onTabChange={(tab) => router.replace(`/${tab}`)} />{Boolean(toast) && <View style={styles.toast}><Icon name="information-circle" size={18} color={COLORS.white} /><Text style={styles.toastText}>{toast}</Text></View>}<CheckInModal visible={checkInVisible} onClose={() => setCheckInVisible(false)} onConfirm={checkIn} /><MemberModal member={liveSelectedMember} onShowTrail={showTrail} onClose={() => setSelectedMember(null)} /></SafeAreaView>;
+  return <SafeAreaView edges={activeTab === 'map' ? ['bottom', 'left', 'right'] : undefined} style={[styles.appRoot, activeTab === 'map' && styles.mapAppRoot]}><StatusBar style="dark" />{activeTab !== 'map' && <Header circleName={circle?.circleName ?? 'No circle'} selfMember={headerSelf} onSettings={() => router.replace('/you')} />}<View style={styles.mainContent}>{content}</View><BottomTabs activeTab={activeTab} onTabChange={(tab) => router.replace(`/${tab}`)} />{Boolean(toast) && <View style={styles.toast}><Icon name="information-circle" size={18} color={COLORS.white} /><Text style={styles.toastText}>{toast}</Text></View>}<CheckInModal visible={checkInVisible} onClose={() => setCheckInVisible(false)} onConfirm={checkIn} />{activeTab !== 'map' && <MemberModal member={liveSelectedMember} history={selectedHistory} onShowTrail={showTrail} onClose={() => setSelectedMember(null)} />}</SafeAreaView>;
 }
 
 const styles = StyleSheet.create({
@@ -817,15 +988,57 @@ const styles = StyleSheet.create({
   confirmCheckInText: { fontFamily: FONTS.heavy, color: COLORS.white, fontWeight: 'normal', fontSize: 13 },
   cancelButton: { minHeight: 48, alignItems: 'center', justifyContent: 'center', paddingVertical: 14 },
   cancelButtonText: { fontFamily: FONTS.bold, color: COLORS.muted, fontWeight: 'normal', fontSize: 12 },
-  memberSheet: { backgroundColor: COLORS.canvas, borderRadius: RADII.sheet, marginHorizontal: 12, marginBottom: 12, paddingHorizontal: 24, paddingTop: 12, paddingBottom: 28, ...SHADOWS.sheet },
+  memberSheet: { backgroundColor: COLORS.white, borderTopLeftRadius: RADII.sheetLarge, borderTopRightRadius: RADII.sheetLarge, marginHorizontal: 0, marginBottom: 0, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 20, maxHeight: '88%', ...SHADOWS.sheet },
+  memberSheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: COLORS.handle, alignSelf: 'center', marginTop: 4, marginBottom: 10 },
+  memberTopBar: { backgroundColor: COLORS.white, flexDirection: 'row', alignItems: 'center', paddingVertical: 6, marginBottom: 0 },
+  memberBackButton: { width: 48, height: 48, borderRadius: RADII.pill, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', ...SHADOWS.card },
+  memberTopBarCopy: { flex: 1, marginHorizontal: 8, alignItems: 'center' },
+  memberTopBarName: { fontFamily: FONTS.regular, color: COLORS.ink, fontSize: 15, textAlign: 'center' },
+  memberTopBarSubtitle: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 11, marginTop: 2, textAlign: 'center' },
+  memberTopBarSpacer: { width: 48 },
+  mapMemberHeader: { position: 'absolute', left: 16, right: 16, minHeight: 56, backgroundColor: COLORS.white, borderRadius: RADII.pill, paddingVertical: 6, paddingLeft: 6, paddingRight: 6, flexDirection: 'row', alignItems: 'center', gap: 10, ...SHADOWS.floating, zIndex: 10 },
+  mapMemberBack: { width: 44, height: 44, borderRadius: RADII.pill, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', ...SHADOWS.card },
+  mapMemberHeaderCopy: { flex: 1, marginHorizontal: 2, justifyContent: 'center' },
+  mapMemberHeaderName: { fontFamily: FONTS.regular, color: COLORS.ink, fontSize: 15 },
+  mapMemberHeaderSubtitle: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 11, marginTop: 2 },
+  mapMemberRefresh: { width: 44, height: 44, borderRadius: RADII.pill, backgroundColor: COLORS.purple, alignItems: 'center', justifyContent: 'center', ...SHADOWS.card },
+  mapMemberSheet: { position: 'absolute', left: 12, right: 12, bottom: 0, backgroundColor: COLORS.white, borderTopLeftRadius: RADII.sheetLarge, borderTopRightRadius: RADII.sheetLarge, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 20, maxHeight: '52%', ...SHADOWS.sheet, zIndex: 10 },
+  mapMemberSheetBase: { position: 'absolute', bottom: 0, backgroundColor: COLORS.white, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 20, ...SHADOWS.sheet, zIndex: 10 },
+  mapMemberHandleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 2 },
+  mapMemberHandleHit: { flex: 1, height: 48, alignItems: 'center', justifyContent: 'center' },
+  mapMemberHandleBar: { width: 40, height: 4, borderRadius: 2, backgroundColor: COLORS.handle },
+  mapMemberToggle: { width: 44, height: 44, borderRadius: RADII.pill, alignItems: 'center', justifyContent: 'center' },
+  memberAvatarOverlap: { alignItems: 'center', marginTop: -6, marginBottom: 10 },
+  memberAvatarRing: { borderRadius: RADII.pill, borderWidth: 4, borderColor: COLORS.white, ...SHADOWS.floating },
+  memberSheetScroll: { flexGrow: 0, flexShrink: 1 },
+  memberSheetScrollContent: { paddingBottom: 12 },
+  memberSheetName: { fontFamily: FONTS.heavy, color: COLORS.ink, fontSize: 24, letterSpacing: -0.6, flexShrink: 1 },
+  memberDetailNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, marginRight: 10 },
+  memberOnlineDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: COLORS.online, borderWidth: 2, borderColor: COLORS.white },
+  memberOnlineDotOff: { backgroundColor: COLORS.subtle },
+  memberBatteryPill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: COLORS.white, borderWidth: 1, borderColor: '#E4E0EC', borderRadius: RADII.pill, paddingVertical: 7, paddingHorizontal: 12, ...SHADOWS.card },
+  memberBatteryText: { fontFamily: FONTS.bold, color: COLORS.deepPurple, fontSize: 12 },
+  memberStreetTime: { fontFamily: FONTS.bold, color: COLORS.ink, fontSize: 13, lineHeight: 18, marginTop: 8, textAlign: 'center' },
+  memberStickyFade: { backgroundColor: 'rgba(255,255,255,0.92)', paddingTop: 10, marginHorizontal: -20, paddingHorizontal: 20 },
+  memberStickyRow: { flexDirection: 'row', gap: 10, paddingBottom: 2, alignItems: 'center' },
+  memberTrailPill: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.white, borderRadius: RADII.pill, paddingVertical: 14, paddingHorizontal: 18, ...SHADOWS.floating },
+  memberTrailPillText: { fontFamily: FONTS.heavy, color: COLORS.ink, fontSize: 13, flexShrink: 1 },
+  memberHistoryCard: { backgroundColor: COLORS.white, borderRadius: RADII.card, padding: 16, marginTop: 10, ...SHADOWS.card },
+  memberHistoryTitle: { fontFamily: FONTS.heavy, color: COLORS.ink, fontSize: 15 },
+  memberHistorySubtitle: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 11, marginTop: 4, marginBottom: 6 },
+  memberHistoryRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 9 },
+  memberHistoryDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: COLORS.purple, marginTop: 4 },
+  memberHistoryCopy: { flex: 1 },
+  memberHistoryTime: { fontFamily: FONTS.bold, color: COLORS.ink, fontSize: 12 },
+  memberHistoryCoords: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 11, marginTop: 2, fontVariant: ['tabular-nums'] },
   modalClose: { width: 48, height: 48, borderRadius: RADII.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.white },
-  memberSheetHeader: { flexDirection: 'row', alignItems: 'center' },
+  memberSheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 },
   memberSheetCopy: { flex: 1, marginLeft: 13 },
   memberSheetRole: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 12, marginTop: 5 },
-  memberDetailGrid: { flexDirection: 'row', gap: 8, marginTop: 23, marginBottom: 18 },
+  memberDetailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 20, marginBottom: 8 },
   trailButton: { height: 50, backgroundColor: COLORS.purple, borderRadius: RADII.pill, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 },
   trailButtonText: { fontFamily: FONTS.heavy, color: COLORS.white, fontWeight: 'normal', fontSize: 13, flex: 1, textAlign: 'center' },
-  detailStat: { flex: 1, backgroundColor: COLORS.canvas, borderRadius: RADII.card, minHeight: 74, padding: 10 },
-  detailStatLabel: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 9, marginTop: 8 },
-  detailStatValue: { fontFamily: FONTS.heavy, color: COLORS.ink, fontWeight: 'normal', fontSize: 11, marginTop: 3 },
+  detailStat: { width: '48%', flexGrow: 1, backgroundColor: COLORS.lavender, borderRadius: RADII.card, minHeight: 86, padding: 12, ...SHADOWS.card },
+  detailStatLabel: { fontFamily: FONTS.bold, color: COLORS.muted, fontSize: 10, marginTop: 8 },
+  detailStatValue: { fontFamily: FONTS.heavy, color: COLORS.ink, fontSize: 12, marginTop: 3, lineHeight: 16 },
 });

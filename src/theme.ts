@@ -23,6 +23,13 @@ export const COLORS = {
   mapWater: '#B8D7E3',
   handle: '#CEC9D5',
   danger: '#EB5B68',
+  /* Member-detail tokens (centralized; existing names preserved).
+     NOTE: COLORS.coral historically aliases the primary purple (#6B4EE6) and
+     is referenced across map/circle/activity screens, so it is intentionally
+     left unchanged. */
+  lavender: '#F5F2FC',
+  batteryOrange: '#E8833A',
+  online: '#34C759',
 };
 
 export const FONTS = {
@@ -32,7 +39,7 @@ export const FONTS = {
   heavy: 'Poppins-ExtraBold',
 };
 
-export const RADII = { card: 24, sheet: 32, pill: 999 };
+export const RADII = { card: 24, sheet: 32, sheetLarge: 40, pill: 999 };
 export const AVATAR_COLORS = [COLORS.mint, COLORS.blue, COLORS.deepPurple];
 export const SHADOWS = {
   floating: {
