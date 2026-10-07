@@ -6,28 +6,36 @@ import ts from 'typescript';
 
 const leaflet = JSON.parse(readFileSync(new URL('../assets/leaflet/bundle.json', import.meta.url), 'utf8'));
 const source = readFileSync(new URL('../src/lib/openstreetmap-document.ts', import.meta.url), 'utf8');
-const context = createContext({ exports: {}, require: () => leaflet });
+const themeContext = createContext({ exports: {} });
+runInContext(ts.transpileModule(readFileSync(new URL('../src/theme.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, themeContext);
+const batteryContext = createContext({ exports: {} });
+runInContext(ts.transpileModule(readFileSync(new URL('../src/lib/battery-display.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, batteryContext);
+const context = createContext({ exports: {}, require: path => path === '../theme' ? themeContext.exports : path === './battery-display' ? batteryContext.exports : leaflet });
 runInContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, context);
 const html = context.exports.OPENSTREETMAP_HTML;
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
 
-function mapHarness() {
+function mapHarness(project = () => ({ x: 200, y: 200 })) {
   const layers = [], messages = [], bounds = [];
   const handlers = {};
   const domListeners = {};
   const mapNode = { addEventListener: (type, callback) => { (domListeners[`map:${type}`] ??= []).push(callback); } };
-  const map = { id: null, options: null, handlers, attributionControl: { setPosition() {} }, setView() { return this; }, fitBounds(points, options) { bounds.push({ points, options }); }, invalidateSize() {}, getBoundsZoom() { return 2; }, setMinZoom() {}, panInsideBounds() {}, on(event, callback) { (handlers[event] ??= []).push(callback); return this; } };
+  const map = { id: null, options: null, handlers, attributionControl: { setPosition(position) { this.position = position; }, setPrefix(prefix) { this.prefix = prefix; } }, setView() { return this; }, fitBounds(points, options) { bounds.push({ points, options }); }, invalidateSize() {}, getSize() { return { x: 400, y: 800 }; }, getZoom() { return 15; }, latLngToContainerPoint: project, getBoundsZoom() { return 2; }, setMinZoom() {}, panInsideBounds() {}, on(event, callback) { for (const name of event.split(' ')) (handlers[name] ??= []).push(callback); return this; } };
   const group = () => { const layer = { items: [], addTo() { return this; }, clearLayers() { this.items = []; } }; layers.push(layer); return layer; };
   const item = (coordinates, options) => ({ coordinates, options, addTo(layer) { layer.items.push(this); return this; }, on(event, callback) { this[event] = callback; return this; } });
   const window = { ReactNativeWebView: { postMessage: json => messages.push(JSON.parse(json)) }, addEventListener() {} };
-  const document = { createElement: tag => ({ tag, style: {}, children: [], appendChild(child) { this.children.push(child); } }), getElementById: () => mapNode, addEventListener: (type, callback) => { (domListeners[`document:${type}`] ??= []).push(callback); } };
-  runInContext(scripts[1], createContext({ window, document, Number, ResizeObserver: class { observe() {} }, L: {
+  const element = tag => ({ tag, style: {}, children: [], appendChild(child) { this.children.push(child); }, replaceChildren() { this.children = []; }, setAttribute(name, value) { this[name] = value; }, addEventListener(name, callback) { this[name] = callback; } });
+  const edges = element('div');
+  const attribution = element('div');
+  let animationFrame;
+  const document = { createElement: element, querySelector: () => attribution, getElementById: id => id === 'edge-markers' ? edges : mapNode, addEventListener: (type, callback) => { (domListeners[`document:${type}`] ??= []).push(callback); } };
+  runInContext(scripts[1], createContext({ window, document, Number, requestAnimationFrame: callback => { animationFrame = callback; return 1; }, ResizeObserver: class { observe() {} }, L: {
     latLngBounds: bounds => bounds, map: (id, options) => { map.id = id; map.options = options; return map; }, tileLayer: () => ({ addTo() {} }), layerGroup: group,
     marker: item, polyline: item, circleMarker: item, divIcon: options => options,
   } }));
   const fireMap = (event) => { (handlers[event] ?? []).forEach((callback) => callback()); };
   const fireDom = (target, type) => { (domListeners[`${target}:${type}`] ?? []).forEach((callback) => callback()); };
-  return { receive: window.free360Receive, layers, messages, bounds, map, fireMap, fireDom };
+  return { receive: window.free360Receive, layers, messages, bounds, map, attribution, fireMap, fireDom, edges, flushFrame: () => { animationFrame?.(); animationFrame = null; } };
 }
 
 test('map bundles executable Leaflet without remote scripts or Google Maps', () => {
@@ -47,7 +55,7 @@ test('member text stays inert, unsafe avatars are rejected, taps return the memb
   assert.equal(map.layers[0].items.length, 1);
   const marker = map.layers[0].items[0];
   const row = marker.options.icon.html;
-  assert.equal(row.children[0].children[0].textContent, malicious);
+  assert.equal(row.children[0].children[0].textContent, malicious.slice(0, 1));
   assert.equal(row.children[0].children[0].children.length, 0);
   assert.equal(row.children[1].textContent, malicious);
   marker.click();
@@ -188,8 +196,89 @@ test('stationary members omit the movement badge; moving members keep it with ot
   assert.equal(rows[0].children.filter((child) => child.className === 'movement').length, 0);
   // Avatar, initials and battery survive the suppression.
   assert.equal(rows[0].children[0].children[0].textContent, 'S');
-  assert.equal(rows[0].children[0].children[1].textContent, '50%');
+  assert.equal(rows[0].children[0].children[1].title, '50% battery');
+  assert.equal(rows[0].children[0].children[1].children[0].children[0].style.width, '50%');
+  assert.equal(rows[0].children[0].children[1].children[1].textContent, '50%');
   const badges = rows[1].children.filter((child) => child.className === 'movement');
   assert.equal(badges.length, 1);
   assert.equal(badges[0].textContent, '🚶 ~18 km/h');
+});
+
+test('map credit omits Leaflet and follows the panel instead of a fixed CSS offset', () => {
+  const harness = mapHarness();
+  assert.equal(harness.map.attributionControl.prefix, false);
+  assert.equal(harness.map.attributionControl.position, 'bottomleft');
+  const css = html.match(/\.leaflet-control-attribution\{([^}]+)\}/g).at(-1);
+  assert.ok(!/margin-bottom:[^;]*!important/.test(css));
+  for (const inset of [280, 672, 280]) {
+    harness.receive({ type: 'render', data: { members: [], homes: [], trail: [], bottomInset: inset } });
+    assert.equal(harness.attribution.style.marginBottom, `${inset + 8}px`);
+  }
+});
+
+test('stay bubble has a purple pin and inert elapsed copy, with no competing speed pill', () => {
+  const map = mapHarness();
+  const duration = '<img src=x onerror=alert(1)>';
+  map.receive({ type: 'render', data: { members: [{ id: 'sam', coordinate: { latitude: 43, longitude: -79 }, name: 'Sam', initials: 'S', color: '#123456', stayDuration: duration, movement: '18 km/h' }], homes: [], trail: [], trailColor: '#123456', bottomInset: 350, topInset: 100 } });
+  const row = map.layers[0].items[0].options.icon.html;
+  const bubble = row.children.find(child => child.className === 'stay');
+  assert.ok(bubble.children[0].innerHTML.includes('<svg'));
+  assert.equal(bubble.children[1].children[0].textContent, 'Here for');
+  assert.equal(bubble.children[1].children[1].textContent, duration);
+  assert.equal(bubble.children[1].children[1].children.length, 0);
+  assert.ok(!row.children.some(child => child.className === 'movement'));
+  map.receive({ type: 'center', region: { latitude: 43, longitude: -79, latitudeDelta: .024, longitudeDelta: .024 } });
+  assert.equal(map.bounds[0].options.paddingBottomRight[1], 394);
+});
+
+test('edge avatars follow offscreen members, clear when visible and open the correct member', () => {
+  let projection = { x: 600, y: 250 };
+  const map = mapHarness(() => projection);
+  const member = { id: 'sam', coordinate: { latitude: 43, longitude: -79 }, name: 'Sam', initials: 'SA', color: '#007F6B' };
+  map.receive({ type: 'render', data: { members: [member], homes: [], trail: [], trailColor: '#123456', bottomInset: 340, topInset: 80 } });
+  map.flushFrame();
+  assert.equal(map.edges.children.length, 1);
+  const edge = map.edges.children[0];
+  assert.equal(edge.textContent, 'S');
+  assert.equal(edge.style.left, '362px');
+  assert.ok(parseFloat(edge.style.top) < 402);
+  edge.click();
+  assert.deepEqual(map.messages.at(-1), { type: 'member', id: 'sam' });
+  assert.equal(map.bounds.at(-1).options.maxZoom, 15);
+  projection = { x: 200, y: 200 };
+  map.fireMap('move'); map.flushFrame();
+  assert.equal(map.edges.children.length, 0);
+  projection = { x: 200, y: 700 };
+  map.fireMap('resize'); map.flushFrame();
+  assert.equal(map.edges.children.length, 1);
+  assert.equal(map.edges.children[0].style.top, '384px');
+});
+
+test('only the highlighted member gets a stay bubble and is drawn above nearby avatars', () => {
+  const map = mapHarness();
+  const base = { coordinate: { latitude: 43, longitude: -79 }, initials: 'S', color: '#007F6B', stayDuration: '5 hrs' };
+  map.receive({ type: 'render', data: { members: [{ ...base, id: 'self', name: 'Sam' }, { ...base, id: 'selected', name: 'Alex' }], homes: [], trail: [], trailColor: '#123456', highlightedMemberId: 'selected' } });
+  const markers = map.layers[0].items;
+  assert.ok(!markers[0].options.icon.html.children.some(child => child.className === 'stay'));
+  assert.ok(markers[1].options.icon.html.children.some(child => child.className === 'stay'));
+  assert.equal(markers[0].options.zIndexOffset, 0);
+  assert.equal(markers[1].options.zIndexOffset, 500);
+});
+
+test('battery numbers sit inside the icon, change color at thresholds and omit unavailable readings', () => {
+  const map = mapHarness();
+  const levels = [0, 20, 21, 50, 51, 100, null, -1, NaN, '35'];
+  const base = { coordinate: { latitude: 43, longitude: -79 }, initials: 'S', name: 'Sam', color: '#007F6B' };
+  map.receive({ type: 'render', data: { members: levels.map((battery, index) => ({ ...base, id: String(index), battery })), homes: [], trail: [], trailColor: '#123456' } });
+  const markers = map.layers[0].items;
+  for (let index = 0; index < 6; index++) {
+    const battery = markers[index].options.icon.html.children[0].children[1];
+    assert.equal(battery.children[1].textContent, `${levels[index]}%`);
+    assert.equal(battery.children[0].children[0].style.width, `${levels[index]}%`);
+    assert.equal(battery.style.color, index < 2 ? '#D92D42' : index < 4 ? '#C06B16' : '#178347');
+  }
+  for (let index = 6; index < levels.length; index++) {
+    assert.equal(markers[index].options.icon.html.children[0].children.length, 1);
+  }
+  assert.equal(markers[0].options.icon.iconSize[0], 58);
 });

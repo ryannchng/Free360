@@ -26,6 +26,25 @@ const stay = loadModule('../src/lib/location-stay.ts', (path) => {
 const at = (latitude, longitude, timestamp, accuracy = 5, moving = false) => ({ latitude, longitude, timestamp, accuracy, moving });
 const T0 = new Date(2025, 4, 12, 15, 24, 0).getTime();
 
+test('stay duration uses elapsed minutes and handles missing, future and invalid times', () => {
+  assert.equal(stay.stayDurationLabel(T0, T0 + (5 * 60 + 49) * 60000), '5 hrs, 49 mins');
+  assert.equal(stay.stayDurationLabel(T0, T0 + 60 * 60000), '1 hr');
+  assert.equal(stay.stayDurationLabel(T0, T0 + 61000), '1 min');
+  assert.equal(stay.stayDurationLabel(T0 + 60000, T0), 'Less than a minute');
+  assert.equal(stay.stayDurationLabel(null, T0), null);
+  assert.equal(stay.stayDurationLabel(NaN, T0), null);
+  assert.equal(stay.stayDurationLabel(T0, 0), null);
+});
+
+test('remote stay uses contiguous observations and stops at relocation or missing history', () => {
+  const point = (latitude, minute) => ({ latitude, longitude: -79, recordedAt: new Date(T0 + minute * 60000).toISOString() });
+  assert.equal(stay.observedStaySince([point(43, 10), point(43.0001, 0), point(43, 5)]), T0);
+  assert.equal(stay.observedStaySince([point(44, 0), point(43, 5), point(43, 10)]), T0 + 5 * 60000);
+  assert.equal(stay.observedStaySince([point(43, 0), point(43, 20)]), T0 + 20 * 60000);
+  assert.equal(stay.observedStaySince([]), null);
+  assert.equal(stay.observedStaySince([point(91, 0)]), null);
+});
+
 test('first fix starts the stay; jitter inside tolerance keeps the original start', () => {
   let state = stay.updateStay(null, at(43.0, -79.0, T0));
   assert.deepEqual(state, { latitude: 43.0, longitude: -79.0, accuracy: 5, sinceMs: T0 });

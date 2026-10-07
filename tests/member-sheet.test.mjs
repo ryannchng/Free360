@@ -12,6 +12,23 @@ async function loadModule(relativePath) {
 
 const sheet = await loadModule('../src/lib/member-sheet.ts');
 
+test('circle list expansion reveals more rows without covering the map header', () => {
+  for (const [height, inset, restingHeight] of [[700, 30, 280], [900, 59, 306], [500, 20, 280]]) {
+    const { collapsed, expanded } = sheet.resolveCircleSheetHeights(height, inset);
+    assert.equal(collapsed, restingHeight);
+    assert.ok(expanded > collapsed);
+    assert.ok(expanded <= height - inset - 84);
+  }
+});
+
+test('circle list stays within short screens and waits for the initial measurement', () => {
+  assert.deepEqual(sheet.resolveCircleSheetHeights(0, 0), { collapsed: 280, expanded: 280 });
+  assert.deepEqual(sheet.resolveCircleSheetHeights(NaN, 0), { collapsed: 280, expanded: 280 });
+  const tiny = sheet.resolveCircleSheetHeights(200, 30);
+  assert.equal(tiny.collapsed, tiny.expanded);
+  assert.ok(tiny.collapsed <= 200);
+});
+
 test('collapsed rest height is ~52% of the map container', () => {
   assert.equal(sheet.resolveMemberSheetHeights(700, 30).collapsed, Math.round(700 * 0.52));
   assert.equal(sheet.resolveMemberSheetHeights(1000, 0).collapsed, 520);

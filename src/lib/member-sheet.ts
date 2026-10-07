@@ -33,6 +33,18 @@ export const MEMBER_SHEET_FLING_VELOCITY = 0.5;
 
 export type MemberSheetHeights = { collapsed: number; expanded: number };
 
+/** Circle list: rest low to expose more map, expand below the map header. */
+export function resolveCircleSheetHeights(containerHeight: number, topInset: number): MemberSheetHeights {
+  if (!Number.isFinite(containerHeight) || containerHeight <= 0) {
+    return { collapsed: 280, expanded: 280 };
+  }
+  const safeTop = Number.isFinite(topInset) && topInset > 0 ? topInset : 0;
+  const collapsed = Math.min(Math.max(280, containerHeight * 0.34), containerHeight * 0.6);
+  const available = Math.min(containerHeight * 0.88, containerHeight - safeTop - 84);
+  const expanded = available - collapsed >= 24 ? available : collapsed;
+  return { collapsed, expanded };
+}
+
 /**
  * Resolve collapsed/expanded sheet heights (px) for the actual map container
  * height and top safe-area inset. The expanded height is the smaller of the

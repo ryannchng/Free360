@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { avatarUriFor, initialsForName } from '../lib/member-display';
-import { COLORS, FONTS, RADII, SHADOWS } from '../theme';
+import { COLORS, FONTS } from '../theme';
+import { BatteryBadge } from './BatteryBadge';
 
 type MemberAvatarProps = {
   name?: string | null;
@@ -32,7 +33,7 @@ export function MemberAvatar({
   onLoadingChange,
 }: MemberAvatarProps) {
   const uri = avatarUriFor(avatar);
-  const label = initials && initials.trim() ? initials.trim().toUpperCase().slice(0, 2) : initialsForName(name ?? '');
+  const label = (initials && initials.trim() ? initials.trim().toUpperCase() : initialsForName(name ?? '')).slice(0, 1);
   const [failed, setFailed] = useState(false);
   const showPhoto = Boolean(uri) && !failed;
 
@@ -61,7 +62,7 @@ export function MemberAvatar({
           <Text style={[styles.initials, { fontSize: size * 0.31 }]}>{label}</Text>
         )}
       </View>
-      {badgeText ? <Text style={styles.badge}>{badgeText}</Text> : null}
+      {badgeText ? <View style={styles.badge}><BatteryBadge value={Number(badgeText.replace(/%$/, ''))} /></View> : null}
     </View>
   );
 }
@@ -77,10 +78,6 @@ const styles = StyleSheet.create({
   },
   initials: { color: COLORS.white, fontFamily: FONTS.heavy, letterSpacing: -0.5 },
   badge: {
-    position: 'absolute', bottom: -7, alignSelf: 'center',
-    minWidth: 36, paddingHorizontal: 6, paddingVertical: 2,
-    borderRadius: RADII.pill, backgroundColor: COLORS.white,
-    fontFamily: FONTS.bold, fontSize: 10, textAlign: 'center', color: COLORS.mint,
-    ...SHADOWS.card,
+    position: 'absolute', bottom: -6, alignSelf: 'center',
   },
 });

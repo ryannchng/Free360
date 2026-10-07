@@ -19,8 +19,8 @@ test('floating map overlays stay below the notch/status bar via the top inset', 
   assert.match(app, /mapEmptyOverlay: \{[^}]*top: 132,/);
 });
 
-test('no redesign: backgrounds, bottom sheet and status-bar styling untouched', () => {
-  assert.match(app, /mapAppRoot: \{ backgroundColor: '#E5F4EE' \}/);
+test('map and bottom sheet share theme tokens while the status bar stays dark', () => {
+  assert.match(app, /mapAppRoot: \{ backgroundColor: COLORS.mapLand \}/);
   assert.match(app, /mapBottomCard: \{[^}]*bottom: 0,/);
   assert.match(app, /<StatusBar style="dark" \/>/);
   assert.ok(!/StatusBar[^>]*(backgroundColor|translucent)/.test(app));

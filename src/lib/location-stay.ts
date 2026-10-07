@@ -123,6 +123,32 @@ export function sinceLabel(sinceMs: number, nowMs: number): string {
   return `since ${time12h(start)} ${dayLabel(start, now)}`;
 }
 
+/** Elapsed observed stay for the map bubble; unknown times never become zero. */
+export function stayDurationLabel(sinceMs: number | null | undefined, nowMs: number): string | null {
+  if (sinceMs == null || !Number.isFinite(sinceMs) || !Number.isFinite(nowMs) || nowMs <= 0) return null;
+  const minutes = Math.floor(Math.max(0, nowMs - sinceMs) / 60000);
+  if (minutes === 0) return 'Less than a minute';
+  if (minutes < 60) return `${minutes} ${minutes === 1 ? 'min' : 'mins'}`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return `${hours} ${hours === 1 ? 'hr' : 'hrs'}${remainder ? `, ${remainder} ${remainder === 1 ? 'min' : 'mins'}` : ''}`;
+}
+
+/** Consecutive observations at the current place, bounded by gaps in history. */
+export function observedStaySince(points: readonly (LatLng & { recordedAt: string })[]): number | null {
+  const ordered = points.filter(point => isValidCoordinate(point) && Number.isFinite(Date.parse(point.recordedAt)))
+    .toSorted((a, b) => Date.parse(b.recordedAt) - Date.parse(a.recordedAt));
+  const latest = ordered[0];
+  if (!latest) return null;
+  let since = Date.parse(latest.recordedAt);
+  for (const point of ordered.slice(1)) {
+    const time = Date.parse(point.recordedAt);
+    if (since - time > 10 * 60 * 1000 || haversineM(latest.latitude, latest.longitude, point.latitude, point.longitude) > STAY_RADIUS_M) break;
+    since = time;
+  }
+  return since;
+}
+
 export type AddressParts = {
   streetNumber?: unknown;
   street?: unknown;

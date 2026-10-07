@@ -10,8 +10,9 @@ import { OPENSTREETMAP_HTML } from '../lib/openstreetmap-document';
 export type MapMember = {
   id: string; coordinate: LatLng; name: string; initials: string; color: string;
   avatar: unknown; stale: boolean; battery?: number | null; movement: string; description: string;
+  stayDuration?: string | null;
 };
-export type MapData = { members: MapMember[]; homes: { coordinate: LatLng; name: string }[]; trail: LatLng[]; trailColor: string };
+export type MapData = { members: MapMember[]; homes: { coordinate: LatLng; name: string }[]; trail: LatLng[]; trailColor: string; bottomInset?: number; topInset?: number; highlightedMemberId?: string };
 export type OpenStreetMapHandle = { fitGroup: () => void };
 export type MapCommand = { type: 'render'; data: MapData } | { type: 'center'; region: Region } | { type: 'trail'; coordinates: LatLng[] };
 export type MapMessage = { type: 'ready' } | { type: 'member'; id: string } | { type: 'interacted' };
