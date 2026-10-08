@@ -1,64 +1,96 @@
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { createServer } from 'node:http';
-import { DatabaseSync } from 'node:sqlite';
+import {
+    createHash,
+    randomBytes,
+    randomUUID,
+    timingSafeEqual,
+} from "node:crypto";
+import { createServer } from "node:http";
+import { DatabaseSync } from "node:sqlite";
 
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const uuidPattern =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const sessionLimit = 1000;
 
 class HttpError extends Error {
-  constructor(status, message) { super(message); this.status = status; }
+    constructor(status, message) {
+        super(message);
+        this.status = status;
+    }
 }
 
-function hash(value) { return createHash('sha256').update(value, 'utf8').digest(); }
-function validUuid(value) { return typeof value === 'string' && uuidPattern.test(value); }
+function hash(value) {
+    return createHash("sha256").update(value, "utf8").digest();
+}
+function validUuid(value) {
+    return typeof value === "string" && uuidPattern.test(value);
+}
 function requireUuid(value, label) {
-  if (!validUuid(value)) throw new HttpError(400, `Invalid ${label}.`);
-  return value;
+    if (!validUuid(value)) throw new HttpError(400, `Invalid ${label}.`);
+    return value;
 }
 function equalSecret(value, stored) {
-  if (typeof value !== 'string' || !stored) return false;
-  return timingSafeEqual(hash(value), Buffer.from(stored, 'hex'));
+    if (typeof value !== "string" || !stored) return false;
+    return timingSafeEqual(hash(value), Buffer.from(stored, "hex"));
 }
 function validEnvelope(value) {
-  return value && typeof value === 'object' && !Array.isArray(value) && value.version === 1 &&
-    typeof value.nonce === 'string' && value.nonce.length >= 20 && value.nonce.length <= 100 &&
-    typeof value.ciphertext === 'string' && value.ciphertext.length >= 24 && value.ciphertext.length <= 8192 &&
-    Buffer.byteLength(JSON.stringify(value)) <= 12000;
+    return (
+        value &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        value.version === 1 &&
+        typeof value.nonce === "string" &&
+        value.nonce.length >= 20 &&
+        value.nonce.length <= 100 &&
+        typeof value.ciphertext === "string" &&
+        value.ciphertext.length >= 24 &&
+        value.ciphertext.length <= 8192 &&
+        Buffer.byteLength(JSON.stringify(value)) <= 12000
+    );
 }
 function transaction(db, work) {
-  db.exec('BEGIN IMMEDIATE');
-  try { const result = work(); db.exec('COMMIT'); return result; }
-  catch (error) { db.exec('ROLLBACK'); throw error; }
+    db.exec("BEGIN IMMEDIATE");
+    try {
+        const result = work();
+        db.exec("COMMIT");
+        return result;
+    } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+    }
 }
 async function readJson(req) {
-  let length = 0;
-  const chunks = [];
-  for await (const chunk of req) {
-    length += chunk.length;
-    if (length > 12000) throw new HttpError(413, 'Request body is too large.');
-    chunks.push(chunk);
-  }
-  try {
-    const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error();
-    return value;
-  } catch { throw new HttpError(400, 'Invalid JSON body.'); }
+    let length = 0;
+    const chunks = [];
+    for await (const chunk of req) {
+        length += chunk.length;
+        if (length > 12000)
+            throw new HttpError(413, "Request body is too large.");
+        chunks.push(chunk);
+    }
+    try {
+        const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        if (!value || typeof value !== "object" || Array.isArray(value))
+            throw new Error();
+        return value;
+    } catch {
+        throw new HttpError(400, "Invalid JSON body.");
+    }
 }
 function send(res, status, data) {
-  res.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-    'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
-  });
-  res.end(JSON.stringify(data));
+    res.writeHead(status, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Authorization, Content-Type",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
+    });
+    res.end(JSON.stringify(data));
 }
 
 export function createFree360Server({ databasePath, setupCode }) {
-  const db = new DatabaseSync(databasePath);
-  db.exec(`
+    const db = new DatabaseSync(databasePath);
+    db.exec(`
     PRAGMA foreign_keys = ON;
     PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS setup (id INTEGER PRIMARY KEY CHECK (id = 1), secret_hash TEXT NOT NULL);
@@ -76,190 +108,477 @@ export function createFree360Server({ databasePath, setupCode }) {
     CREATE INDEX IF NOT EXISTS history_recent_idx ON history(circle_id, received_at);
     CREATE INDEX IF NOT EXISTS history_device_idx ON history(circle_id, device_id, id DESC);
   `);
-  if (!db.prepare('SELECT id FROM circles LIMIT 1').get() && !db.prepare('SELECT id FROM setup WHERE id = 1').get()) {
-    if (typeof setupCode !== 'string' || !/^[a-f0-9]{64}$/.test(setupCode)) throw new Error('FREE360_SETUP_CODE must be 64 lowercase hexadecimal characters on first start. Generate it with openssl rand -hex 32.');
-    db.prepare('INSERT INTO setup (id, secret_hash) VALUES (1, ?)').run(hash(setupCode).toString('hex'));
-  }
-
-  const rateLimits = new Map();
-  function limitSessionCreation(req) {
-    const now = Date.now();
-    const ip = req.socket.remoteAddress || 'unknown';
-    if (rateLimits.size > 5000) for (const [key, entry] of rateLimits) if (entry.until < now) rateLimits.delete(key);
-    const entry = rateLimits.get(ip);
-    if (entry && entry.until > now && entry.count >= 60) throw new HttpError(429, 'Too many device sessions. Try again later.');
-    rateLimits.set(ip, entry && entry.until > now ? { count: entry.count + 1, until: entry.until } : { count: 1, until: now + 3600000 });
-  }
-  function authenticatedUser(req) {
-    const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(req.headers.authorization || '');
-    if (!match || !tokenPattern.test(match[1])) throw new HttpError(401, 'Device session required.');
-    const row = db.prepare('SELECT id FROM sessions WHERE token_hash = ?').get(hash(match[1]).toString('hex'));
-    if (!row) throw new HttpError(401, 'Invalid device session.');
-    return row.id;
-  }
-  function membership(userId, circleId) {
-    return db.prepare('SELECT 1 FROM members WHERE user_id = ? AND circle_id = ?').get(userId, circleId) !== undefined;
-  }
-  function ownCircle(userId) {
-    const row = db.prepare('SELECT circle_id FROM members WHERE user_id = ?').get(userId);
-    if (!row) throw new HttpError(403, 'This device is not a circle member.');
-    return row.circle_id;
-  }
-  function nextRevision(circleId) {
-    db.prepare('UPDATE circles SET revision = revision + 1 WHERE id = ?').run(circleId);
-    return db.prepare('SELECT revision FROM circles WHERE id = ?').get(circleId).revision;
-  }
-
-  const server = createServer(async (req, res) => {
-    try {
-      if (req.method === 'OPTIONS') { send(res, 204, null); return; }
-      const url = new URL(req.url, 'http://localhost');
-      if (req.method === 'GET' && url.pathname === '/health') { send(res, 200, { ok: true }); return; }
-      if (req.method === 'POST' && url.pathname === '/v1/sessions') {
-        limitSessionCreation(req);
-        const result = transaction(db, () => {
-          if (db.prepare('SELECT COUNT(*) AS count FROM sessions').get().count >= sessionLimit) throw new HttpError(429, 'Device session limit reached.');
-          const deviceId = randomUUID();
-          const token = randomBytes(32).toString('base64url');
-          db.prepare('INSERT INTO sessions (id, token_hash, created_at) VALUES (?, ?, ?)').run(deviceId, hash(token).toString('hex'), Date.now());
-          return { deviceId, token };
-        });
-        send(res, 201, result); return;
-      }
-
-      const userId = authenticatedUser(req);
-      if (req.method === 'POST' && url.pathname === '/v1/push-token') {
-        ownCircle(userId);
-        const { token } = await readJson(req);
-        if (typeof token !== 'string' || token.length > 200 || !/^(ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]+\]$/.test(token)) throw new HttpError(400, 'Invalid push token.');
-        transaction(db, () => {
-          db.prepare('DELETE FROM push_tokens WHERE token = ? AND user_id <> ?').run(token, userId);
-          db.prepare('INSERT INTO push_tokens (user_id, token) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET token = excluded.token').run(userId, token);
-        });
-        send(res, 200, { ok: true }); return;
-      }
-      if (req.method === 'POST' && url.pathname === '/v1/notify') {
-        const circleId = ownCircle(userId);
-        const last = db.prepare('SELECT sent_at FROM push_limits WHERE user_id = ?').get(userId);
-        if (last && Date.now() - last.sent_at < 60000) { send(res, 200, { accepted: 0 }); return; }
-        db.prepare('INSERT INTO push_limits (user_id, sent_at) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET sent_at = excluded.sent_at').run(userId, Date.now());
-        const targets = db.prepare('SELECT t.token FROM push_tokens t JOIN members m ON t.user_id = m.user_id WHERE m.circle_id = ? AND m.user_id <> ?').all(circleId, userId);
-        if (!targets.length) { send(res, 200, { accepted: 0 }); return; }
-        const result = await fetch('https://exp.host/--/api/v2/push/send', {
-          method: 'POST', signal: AbortSignal.timeout(10000),
-          headers: { 'Content-Type': 'application/json', ...(process.env.EXPO_ACCESS_TOKEN ? { Authorization: `Bearer ${process.env.EXPO_ACCESS_TOKEN}` } : {}) },
-          body: JSON.stringify(targets.map(({ token }) => ({ to: token, title: 'Free360 home activity', body: 'Someone in your circle arrived at or left a saved home. Open Free360 for details.', sound: 'default', channelId: 'homes', data: { url: '/activity' } }))),
-        });
-        if (!result.ok) throw new HttpError(502, 'Push service unavailable.');
-        const response = await result.json();
-        const tickets = Array.isArray(response.data) ? response.data : [];
-        tickets.forEach((ticket, index) => { if (ticket.details?.error === 'DeviceNotRegistered') db.prepare('DELETE FROM push_tokens WHERE token = ?').run(targets[index].token); });
-        if (tickets.some(ticket => ticket.status === 'error')) throw new HttpError(502, 'One or more notifications were rejected.');
-        send(res, 200, { accepted: tickets.length }); return;
-      }
-      if (req.method === 'POST' && url.pathname === '/v1/circle') {
-        const body = await readJson(req);
-        const circleId = requireUuid(body.circleId, 'circle ID');
-        transaction(db, () => {
-          if (db.prepare('SELECT 1 FROM circles').get()) throw new HttpError(409, 'This server already has a circle.');
-          const setup = db.prepare('SELECT secret_hash FROM setup WHERE id = 1').get();
-          if (!equalSecret(body.setupCode, setup?.secret_hash)) throw new HttpError(403, 'Invalid group setup code.');
-          db.prepare('INSERT INTO circles (id, owner_id) VALUES (?, ?)').run(circleId, userId);
-          db.prepare('INSERT INTO members (user_id, circle_id, joined_at) VALUES (?, ?, ?)').run(userId, circleId, Date.now());
-          db.prepare('DELETE FROM setup').run();
-        });
-        send(res, 201, { circleId }); return;
-      }
-      if (req.method === 'GET' && url.pathname === '/v1/member') {
-        const circleId = requireUuid(url.searchParams.get('circleId'), 'circle ID');
-        send(res, 200, { member: membership(userId, circleId) }); return;
-      }
-      if (req.method === 'POST' && url.pathname === '/v1/invites') {
-        const body = await readJson(req);
-        const inviteId = requireUuid(body.inviteId, 'invitation ID');
-        if (typeof body.secret !== 'string' || body.secret.length < 40 || body.secret.length > 100) throw new HttpError(400, 'Invalid invitation secret.');
-        const expiry = transaction(db, () => {
-          const circle = db.prepare('SELECT id FROM circles WHERE owner_id = ?').get(userId);
-          if (!circle) throw new HttpError(403, 'Only the circle owner can invite people.');
-          db.prepare('DELETE FROM invites WHERE expires_at <= ?').run(Date.now());
-          if (db.prepare('SELECT COUNT(*) AS count FROM invites WHERE circle_id = ?').get(circle.id).count >= 20) throw new HttpError(409, 'Too many active invitations.');
-          const expiresAt = Date.now() + 15 * 60 * 1000;
-          db.prepare('INSERT INTO invites (id, circle_id, secret_hash, expires_at) VALUES (?, ?, ?, ?)').run(inviteId, circle.id, hash(body.secret).toString('hex'), expiresAt);
-          return expiresAt;
-        });
-        send(res, 201, { expiresAt: new Date(expiry).toISOString() }); return;
-      }
-      if (req.method === 'POST' && url.pathname === '/v1/invites/claim') {
-        const body = await readJson(req);
-        const inviteId = requireUuid(body.inviteId, 'invitation ID');
-        const circleId = requireUuid(body.circleId, 'circle ID');
-        transaction(db, () => {
-          if (db.prepare('SELECT 1 FROM members WHERE user_id = ?').get(userId)) throw new HttpError(409, 'This device already belongs to a circle.');
-          const invite = db.prepare('SELECT circle_id, secret_hash, expires_at FROM invites WHERE id = ?').get(inviteId);
-          if (!invite || invite.circle_id !== circleId || invite.expires_at <= Date.now() || !equalSecret(body.secret, invite.secret_hash)) throw new HttpError(403, 'Invitation expired, invalid, or already used.');
-          if (db.prepare('SELECT COUNT(*) AS count FROM members WHERE circle_id = ?').get(circleId).count >= 20) throw new HttpError(409, 'This circle is full.');
-          db.prepare('DELETE FROM invites WHERE id = ?').run(inviteId);
-          db.prepare('INSERT INTO members (user_id, circle_id, joined_at) VALUES (?, ?, ?)').run(userId, circleId, Date.now());
-        });
-        send(res, 200, { circleId }); return;
-      }
-      if ((req.method === 'PUT' && url.pathname === '/v1/snapshot') || (req.method === 'POST' && url.pathname === '/v1/events')) {
-        const body = await readJson(req);
-        if (!validEnvelope(body.envelope)) throw new HttpError(400, 'Invalid encrypted envelope.');
-        const circleId = ownCircle(userId);
-        transaction(db, () => {
-          const revision = nextRevision(circleId);
-          const envelope = JSON.stringify(body.envelope);
-          const now = Date.now();
-          if (url.pathname === '/v1/snapshot') {
-            db.prepare('INSERT INTO snapshots (circle_id, device_id, envelope, revision, received_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(circle_id, device_id) DO UPDATE SET envelope = excluded.envelope, revision = excluded.revision, received_at = excluded.received_at').run(circleId, userId, envelope, revision, now);
-          } else {
-            db.prepare('INSERT INTO events (circle_id, device_id, envelope, revision, received_at) VALUES (?, ?, ?, ?, ?)').run(circleId, userId, envelope, revision, now);
-            db.prepare('DELETE FROM events WHERE circle_id = ? AND id NOT IN (SELECT id FROM events WHERE circle_id = ? ORDER BY id DESC LIMIT 100)').run(circleId, circleId);
-          }
-        });
-        send(res, 200, { ok: true }); return;
-      }
-      if (req.method === 'PUT' && url.pathname === '/v1/history') {
-        const body = await readJson(req);
-        if (!validEnvelope(body.envelope)) throw new HttpError(400, 'Invalid encrypted envelope.');
-        const circleId = ownCircle(userId);
-        transaction(db, () => {
-          const revision = nextRevision(circleId);
-          const now = Date.now();
-          db.prepare('INSERT INTO history (circle_id, device_id, envelope, revision, received_at) VALUES (?, ?, ?, ?, ?)').run(circleId, userId, JSON.stringify(body.envelope), revision, now);
-          db.prepare('DELETE FROM history WHERE circle_id = ? AND received_at < ?').run(circleId, now - 86400000);
-          db.prepare('DELETE FROM history WHERE circle_id = ? AND device_id = ? AND id NOT IN (SELECT id FROM history WHERE circle_id = ? AND device_id = ? ORDER BY id DESC LIMIT 2000)').run(circleId, userId, circleId, userId);
-        });
-        send(res, 200, { ok: true }); return;
-      }
-      if (req.method === 'GET' && url.pathname === '/v1/snapshots') {
-        const circleId = requireUuid(url.searchParams.get('circleId'), 'circle ID');
-        if (!membership(userId, circleId)) throw new HttpError(403, 'This device is not a circle member.');
-        const snapshots = db.prepare('SELECT device_id, envelope FROM snapshots WHERE circle_id = ?').all(circleId).map((row) => ({ device_id: row.device_id, envelope: JSON.parse(row.envelope) }));
-        send(res, 200, { snapshots }); return;
-      }
-      if (req.method === 'GET' && url.pathname === '/v1/history') {
-        const circleId = requireUuid(url.searchParams.get('circleId'), 'circle ID');
-        if (!membership(userId, circleId)) throw new HttpError(403, 'This device is not a circle member.');
-        const history = db.prepare('SELECT device_id, envelope FROM history WHERE circle_id = ? AND received_at >= ? ORDER BY id').all(circleId, Date.now() - 86400000).map((row) => ({ device_id: row.device_id, envelope: JSON.parse(row.envelope) }));
-        send(res, 200, { history }); return;
-      }
-      if (req.method === 'GET' && url.pathname === '/v1/updates') {
-        const circleId = requireUuid(url.searchParams.get('circleId'), 'circle ID');
-        if (!membership(userId, circleId)) throw new HttpError(403, 'This device is not a circle member.');
-        const after = Number(url.searchParams.get('after') || '0');
-        if (!Number.isSafeInteger(after) || after < 0) throw new HttpError(400, 'Invalid update cursor.');
-        const revision = db.prepare('SELECT revision FROM circles WHERE id = ?').get(circleId)?.revision ?? 0;
-        const snapshots = db.prepare('SELECT device_id, envelope FROM snapshots WHERE circle_id = ? AND revision > ? ORDER BY revision').all(circleId, after).map((row) => ({ device_id: row.device_id, envelope: JSON.parse(row.envelope) }));
-        const events = db.prepare('SELECT device_id, envelope FROM events WHERE circle_id = ? AND revision > ? ORDER BY revision').all(circleId, after).map((row) => ({ device_id: row.device_id, envelope: JSON.parse(row.envelope) }));
-        send(res, 200, { revision, snapshots, events }); return;
-      }
-      throw new HttpError(404, 'Endpoint not found.');
-    } catch (error) {
-      if (!(error instanceof HttpError)) console.error('Request failed:', error);
-      if (!res.headersSent) send(res, error instanceof HttpError ? error.status : 500, { error: error instanceof HttpError ? error.message : 'Internal server error.' });
+    if (
+        !db.prepare("SELECT id FROM circles LIMIT 1").get() &&
+        !db.prepare("SELECT id FROM setup WHERE id = 1").get()
+    ) {
+        if (typeof setupCode !== "string" || !/^[a-f0-9]{64}$/.test(setupCode))
+            throw new Error(
+                "FREE360_SETUP_CODE must be 64 lowercase hexadecimal characters on first start. Generate it with openssl rand -hex 32.",
+            );
+        db.prepare("INSERT INTO setup (id, secret_hash) VALUES (1, ?)").run(
+            hash(setupCode).toString("hex"),
+        );
     }
-  });
-  return { server, db };
+
+    const rateLimits = new Map();
+    function limitSessionCreation(req) {
+        const now = Date.now();
+        const ip = req.socket.remoteAddress || "unknown";
+        if (rateLimits.size > 5000)
+            for (const [key, entry] of rateLimits)
+                if (entry.until < now) rateLimits.delete(key);
+        const entry = rateLimits.get(ip);
+        if (entry && entry.until > now && entry.count >= 60)
+            throw new HttpError(
+                429,
+                "Too many device sessions. Try again later.",
+            );
+        rateLimits.set(
+            ip,
+            entry && entry.until > now
+                ? { count: entry.count + 1, until: entry.until }
+                : { count: 1, until: now + 3600000 },
+        );
+    }
+    function authenticatedUser(req) {
+        const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(
+            req.headers.authorization || "",
+        );
+        if (!match || !tokenPattern.test(match[1]))
+            throw new HttpError(401, "Device session required.");
+        const row = db
+            .prepare("SELECT id FROM sessions WHERE token_hash = ?")
+            .get(hash(match[1]).toString("hex"));
+        if (!row) throw new HttpError(401, "Invalid device session.");
+        return row.id;
+    }
+    function membership(userId, circleId) {
+        return (
+            db
+                .prepare(
+                    "SELECT 1 FROM members WHERE user_id = ? AND circle_id = ?",
+                )
+                .get(userId, circleId) !== undefined
+        );
+    }
+    function ownCircle(userId) {
+        const row = db
+            .prepare("SELECT circle_id FROM members WHERE user_id = ?")
+            .get(userId);
+        if (!row)
+            throw new HttpError(403, "This device is not a circle member.");
+        return row.circle_id;
+    }
+    function nextRevision(circleId) {
+        db.prepare(
+            "UPDATE circles SET revision = revision + 1 WHERE id = ?",
+        ).run(circleId);
+        return db
+            .prepare("SELECT revision FROM circles WHERE id = ?")
+            .get(circleId).revision;
+    }
+
+    const server = createServer(async (req, res) => {
+        try {
+            if (req.method === "OPTIONS") {
+                send(res, 204, null);
+                return;
+            }
+            const url = new URL(req.url, "http://localhost");
+            if (req.method === "GET" && url.pathname === "/health") {
+                send(res, 200, { ok: true });
+                return;
+            }
+            if (req.method === "POST" && url.pathname === "/v1/sessions") {
+                limitSessionCreation(req);
+                const result = transaction(db, () => {
+                    if (
+                        db
+                            .prepare("SELECT COUNT(*) AS count FROM sessions")
+                            .get().count >= sessionLimit
+                    )
+                        throw new HttpError(
+                            429,
+                            "Device session limit reached.",
+                        );
+                    const deviceId = randomUUID();
+                    const token = randomBytes(32).toString("base64url");
+                    db.prepare(
+                        "INSERT INTO sessions (id, token_hash, created_at) VALUES (?, ?, ?)",
+                    ).run(deviceId, hash(token).toString("hex"), Date.now());
+                    return { deviceId, token };
+                });
+                send(res, 201, result);
+                return;
+            }
+
+            const userId = authenticatedUser(req);
+            if (req.method === "POST" && url.pathname === "/v1/push-token") {
+                ownCircle(userId);
+                const { token } = await readJson(req);
+                if (
+                    typeof token !== "string" ||
+                    token.length > 200 ||
+                    !/^(ExponentPushToken|ExpoPushToken)\[[A-Za-z0-9_-]+\]$/.test(
+                        token,
+                    )
+                )
+                    throw new HttpError(400, "Invalid push token.");
+                transaction(db, () => {
+                    db.prepare(
+                        "DELETE FROM push_tokens WHERE token = ? AND user_id <> ?",
+                    ).run(token, userId);
+                    db.prepare(
+                        "INSERT INTO push_tokens (user_id, token) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET token = excluded.token",
+                    ).run(userId, token);
+                });
+                send(res, 200, { ok: true });
+                return;
+            }
+            if (req.method === "POST" && url.pathname === "/v1/notify") {
+                const circleId = ownCircle(userId);
+                const last = db
+                    .prepare(
+                        "SELECT sent_at FROM push_limits WHERE user_id = ?",
+                    )
+                    .get(userId);
+                if (last && Date.now() - last.sent_at < 60000) {
+                    send(res, 200, { accepted: 0 });
+                    return;
+                }
+                db.prepare(
+                    "INSERT INTO push_limits (user_id, sent_at) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET sent_at = excluded.sent_at",
+                ).run(userId, Date.now());
+                const targets = db
+                    .prepare(
+                        "SELECT t.token FROM push_tokens t JOIN members m ON t.user_id = m.user_id WHERE m.circle_id = ? AND m.user_id <> ?",
+                    )
+                    .all(circleId, userId);
+                if (!targets.length) {
+                    send(res, 200, { accepted: 0 });
+                    return;
+                }
+                const result = await fetch(
+                    "https://exp.host/--/api/v2/push/send",
+                    {
+                        method: "POST",
+                        signal: AbortSignal.timeout(10000),
+                        headers: {
+                            "Content-Type": "application/json",
+                            ...(process.env.EXPO_ACCESS_TOKEN
+                                ? {
+                                      Authorization: `Bearer ${process.env.EXPO_ACCESS_TOKEN}`,
+                                  }
+                                : {}),
+                        },
+                        body: JSON.stringify(
+                            targets.map(({ token }) => ({
+                                to: token,
+                                title: "Free360 home activity",
+                                body: "Someone in your circle arrived at or left a saved home. Open Free360 for details.",
+                                sound: "default",
+                                channelId: "homes",
+                                data: { url: "/activity" },
+                            })),
+                        ),
+                    },
+                );
+                if (!result.ok)
+                    throw new HttpError(502, "Push service unavailable.");
+                const response = await result.json();
+                const tickets = Array.isArray(response.data)
+                    ? response.data
+                    : [];
+                tickets.forEach((ticket, index) => {
+                    if (ticket.details?.error === "DeviceNotRegistered")
+                        db.prepare(
+                            "DELETE FROM push_tokens WHERE token = ?",
+                        ).run(targets[index].token);
+                });
+                if (tickets.some((ticket) => ticket.status === "error"))
+                    throw new HttpError(
+                        502,
+                        "One or more notifications were rejected.",
+                    );
+                send(res, 200, { accepted: tickets.length });
+                return;
+            }
+            if (req.method === "POST" && url.pathname === "/v1/circle") {
+                const body = await readJson(req);
+                const circleId = requireUuid(body.circleId, "circle ID");
+                transaction(db, () => {
+                    if (db.prepare("SELECT 1 FROM circles").get())
+                        throw new HttpError(
+                            409,
+                            "This server already has a circle.",
+                        );
+                    const setup = db
+                        .prepare("SELECT secret_hash FROM setup WHERE id = 1")
+                        .get();
+                    if (!equalSecret(body.setupCode, setup?.secret_hash))
+                        throw new HttpError(403, "Invalid group setup code.");
+                    db.prepare(
+                        "INSERT INTO circles (id, owner_id) VALUES (?, ?)",
+                    ).run(circleId, userId);
+                    db.prepare(
+                        "INSERT INTO members (user_id, circle_id, joined_at) VALUES (?, ?, ?)",
+                    ).run(userId, circleId, Date.now());
+                    db.prepare("DELETE FROM setup").run();
+                });
+                send(res, 201, { circleId });
+                return;
+            }
+            if (req.method === "GET" && url.pathname === "/v1/member") {
+                const circleId = requireUuid(
+                    url.searchParams.get("circleId"),
+                    "circle ID",
+                );
+                send(res, 200, { member: membership(userId, circleId) });
+                return;
+            }
+            if (req.method === "POST" && url.pathname === "/v1/invites") {
+                const body = await readJson(req);
+                const inviteId = requireUuid(body.inviteId, "invitation ID");
+                if (
+                    typeof body.secret !== "string" ||
+                    body.secret.length < 40 ||
+                    body.secret.length > 100
+                )
+                    throw new HttpError(400, "Invalid invitation secret.");
+                const expiry = transaction(db, () => {
+                    const circle = db
+                        .prepare("SELECT id FROM circles WHERE owner_id = ?")
+                        .get(userId);
+                    if (!circle)
+                        throw new HttpError(
+                            403,
+                            "Only the circle owner can invite people.",
+                        );
+                    db.prepare("DELETE FROM invites WHERE expires_at <= ?").run(
+                        Date.now(),
+                    );
+                    if (
+                        db
+                            .prepare(
+                                "SELECT COUNT(*) AS count FROM invites WHERE circle_id = ?",
+                            )
+                            .get(circle.id).count >= 20
+                    )
+                        throw new HttpError(
+                            409,
+                            "Too many active invitations.",
+                        );
+                    const expiresAt = Date.now() + 15 * 60 * 1000;
+                    db.prepare(
+                        "INSERT INTO invites (id, circle_id, secret_hash, expires_at) VALUES (?, ?, ?, ?)",
+                    ).run(
+                        inviteId,
+                        circle.id,
+                        hash(body.secret).toString("hex"),
+                        expiresAt,
+                    );
+                    return expiresAt;
+                });
+                send(res, 201, { expiresAt: new Date(expiry).toISOString() });
+                return;
+            }
+            if (req.method === "POST" && url.pathname === "/v1/invites/claim") {
+                const body = await readJson(req);
+                const inviteId = requireUuid(body.inviteId, "invitation ID");
+                const circleId = requireUuid(body.circleId, "circle ID");
+                transaction(db, () => {
+                    if (
+                        db
+                            .prepare("SELECT 1 FROM members WHERE user_id = ?")
+                            .get(userId)
+                    )
+                        throw new HttpError(
+                            409,
+                            "This device already belongs to a circle.",
+                        );
+                    const invite = db
+                        .prepare(
+                            "SELECT circle_id, secret_hash, expires_at FROM invites WHERE id = ?",
+                        )
+                        .get(inviteId);
+                    if (
+                        !invite ||
+                        invite.circle_id !== circleId ||
+                        invite.expires_at <= Date.now() ||
+                        !equalSecret(body.secret, invite.secret_hash)
+                    )
+                        throw new HttpError(
+                            403,
+                            "Invitation expired, invalid, or already used.",
+                        );
+                    if (
+                        db
+                            .prepare(
+                                "SELECT COUNT(*) AS count FROM members WHERE circle_id = ?",
+                            )
+                            .get(circleId).count >= 20
+                    )
+                        throw new HttpError(409, "This circle is full.");
+                    db.prepare("DELETE FROM invites WHERE id = ?").run(
+                        inviteId,
+                    );
+                    db.prepare(
+                        "INSERT INTO members (user_id, circle_id, joined_at) VALUES (?, ?, ?)",
+                    ).run(userId, circleId, Date.now());
+                });
+                send(res, 200, { circleId });
+                return;
+            }
+            if (
+                (req.method === "PUT" && url.pathname === "/v1/snapshot") ||
+                (req.method === "POST" && url.pathname === "/v1/events")
+            ) {
+                const body = await readJson(req);
+                if (!validEnvelope(body.envelope))
+                    throw new HttpError(400, "Invalid encrypted envelope.");
+                const circleId = ownCircle(userId);
+                transaction(db, () => {
+                    const revision = nextRevision(circleId);
+                    const envelope = JSON.stringify(body.envelope);
+                    const now = Date.now();
+                    if (url.pathname === "/v1/snapshot") {
+                        db.prepare(
+                            "INSERT INTO snapshots (circle_id, device_id, envelope, revision, received_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(circle_id, device_id) DO UPDATE SET envelope = excluded.envelope, revision = excluded.revision, received_at = excluded.received_at",
+                        ).run(circleId, userId, envelope, revision, now);
+                    } else {
+                        db.prepare(
+                            "INSERT INTO events (circle_id, device_id, envelope, revision, received_at) VALUES (?, ?, ?, ?, ?)",
+                        ).run(circleId, userId, envelope, revision, now);
+                        db.prepare(
+                            "DELETE FROM events WHERE circle_id = ? AND id NOT IN (SELECT id FROM events WHERE circle_id = ? ORDER BY id DESC LIMIT 100)",
+                        ).run(circleId, circleId);
+                    }
+                });
+                send(res, 200, { ok: true });
+                return;
+            }
+            if (req.method === "PUT" && url.pathname === "/v1/history") {
+                const body = await readJson(req);
+                if (!validEnvelope(body.envelope))
+                    throw new HttpError(400, "Invalid encrypted envelope.");
+                const circleId = ownCircle(userId);
+                transaction(db, () => {
+                    const revision = nextRevision(circleId);
+                    const now = Date.now();
+                    db.prepare(
+                        "INSERT INTO history (circle_id, device_id, envelope, revision, received_at) VALUES (?, ?, ?, ?, ?)",
+                    ).run(
+                        circleId,
+                        userId,
+                        JSON.stringify(body.envelope),
+                        revision,
+                        now,
+                    );
+                    db.prepare(
+                        "DELETE FROM history WHERE circle_id = ? AND received_at < ?",
+                    ).run(circleId, now - 86400000);
+                    db.prepare(
+                        "DELETE FROM history WHERE circle_id = ? AND device_id = ? AND id NOT IN (SELECT id FROM history WHERE circle_id = ? AND device_id = ? ORDER BY id DESC LIMIT 2000)",
+                    ).run(circleId, userId, circleId, userId);
+                });
+                send(res, 200, { ok: true });
+                return;
+            }
+            if (req.method === "GET" && url.pathname === "/v1/snapshots") {
+                const circleId = requireUuid(
+                    url.searchParams.get("circleId"),
+                    "circle ID",
+                );
+                if (!membership(userId, circleId))
+                    throw new HttpError(
+                        403,
+                        "This device is not a circle member.",
+                    );
+                const snapshots = db
+                    .prepare(
+                        "SELECT device_id, envelope FROM snapshots WHERE circle_id = ?",
+                    )
+                    .all(circleId)
+                    .map((row) => ({
+                        device_id: row.device_id,
+                        envelope: JSON.parse(row.envelope),
+                    }));
+                send(res, 200, { snapshots });
+                return;
+            }
+            if (req.method === "GET" && url.pathname === "/v1/history") {
+                const circleId = requireUuid(
+                    url.searchParams.get("circleId"),
+                    "circle ID",
+                );
+                if (!membership(userId, circleId))
+                    throw new HttpError(
+                        403,
+                        "This device is not a circle member.",
+                    );
+                const history = db
+                    .prepare(
+                        "SELECT device_id, envelope FROM history WHERE circle_id = ? AND received_at >= ? ORDER BY id",
+                    )
+                    .all(circleId, Date.now() - 86400000)
+                    .map((row) => ({
+                        device_id: row.device_id,
+                        envelope: JSON.parse(row.envelope),
+                    }));
+                send(res, 200, { history });
+                return;
+            }
+            if (req.method === "GET" && url.pathname === "/v1/updates") {
+                const circleId = requireUuid(
+                    url.searchParams.get("circleId"),
+                    "circle ID",
+                );
+                if (!membership(userId, circleId))
+                    throw new HttpError(
+                        403,
+                        "This device is not a circle member.",
+                    );
+                const after = Number(url.searchParams.get("after") || "0");
+                if (!Number.isSafeInteger(after) || after < 0)
+                    throw new HttpError(400, "Invalid update cursor.");
+                const revision =
+                    db
+                        .prepare("SELECT revision FROM circles WHERE id = ?")
+                        .get(circleId)?.revision ?? 0;
+                const snapshots = db
+                    .prepare(
+                        "SELECT device_id, envelope FROM snapshots WHERE circle_id = ? AND revision > ? ORDER BY revision",
+                    )
+                    .all(circleId, after)
+                    .map((row) => ({
+                        device_id: row.device_id,
+                        envelope: JSON.parse(row.envelope),
+                    }));
+                const events = db
+                    .prepare(
+                        "SELECT device_id, envelope FROM events WHERE circle_id = ? AND revision > ? ORDER BY revision",
+                    )
+                    .all(circleId, after)
+                    .map((row) => ({
+                        device_id: row.device_id,
+                        envelope: JSON.parse(row.envelope),
+                    }));
+                send(res, 200, { revision, snapshots, events });
+                return;
+            }
+            throw new HttpError(404, "Endpoint not found.");
+        } catch (error) {
+            if (!(error instanceof HttpError))
+                console.error("Request failed:", error);
+            if (!res.headersSent)
+                send(res, error instanceof HttpError ? error.status : 500, {
+                    error:
+                        error instanceof HttpError
+                            ? error.message
+                            : "Internal server error.",
+                });
+        }
+    });
+    return { server, db };
 }

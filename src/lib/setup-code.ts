@@ -15,15 +15,15 @@ export const SETUP_CODE_INPUT_MAX_LENGTH = 32;
 const GROUP_SEPARATOR_PATTERN = /[ \-]/g;
 
 export function normalizeSetupCode(value: string): string {
-  return value.replace(GROUP_SEPARATOR_PATTERN, '');
+    return value.replace(GROUP_SEPARATOR_PATTERN, "");
 }
 
 export function isSetupCodeValid(value: string): boolean {
-  return /^[0-9]{16}$/.test(normalizeSetupCode(value));
+    return /^[0-9]{16}$/.test(normalizeSetupCode(value));
 }
 
 export function formatSetupCode(value: string): string {
-  const normalized = normalizeSetupCode(value);
-  if (!normalized) return '';
-  return normalized.replace(/(.{4})(?=.)/g, '$1 ');
+    const normalized = normalizeSetupCode(value);
+    if (!normalized) return "";
+    return normalized.replace(/(.{4})(?=.)/g, "$1 ");
 }

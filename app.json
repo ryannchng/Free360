@@ -1,69 +1,69 @@
 {
-  "expo": {
-    "name": "Free360",
-    "slug": "Free360",
-    "version": "1.0.0",
-    "scheme": "free360",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
-    "ios": {
-      "supportsTablet": true
-    },
-    "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      },
-      "predictiveBackGestureEnabled": false,
-      "permissions": [
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_BACKGROUND_LOCATION",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_LOCATION",
-        "android.permission.ACTIVITY_RECOGNITION",
-        "com.google.android.gms.permission.ACTIVITY_RECOGNITION",
-        "android.permission.CAMERA"
-      ],
-      "package": "com.dhiloshan.Free360"
-    },
-    "plugins": [
-      [
-        "expo-location",
-        {
-          "locationAlwaysAndWhenInUsePermission": "Allow Free360 to share your location with your circle while you travel.",
-          "motionUsagePermission": "Allow Free360 to show whether you are walking, biking or travelling in a vehicle to your circle.",
-          "isAndroidMotionActivityEnabled": true,
-          "isIosBackgroundLocationEnabled": true,
-          "isAndroidBackgroundLocationEnabled": true
+    "expo": {
+        "name": "Free360",
+        "slug": "Free360",
+        "version": "1.0.0",
+        "scheme": "free360",
+        "orientation": "portrait",
+        "icon": "./assets/icon.png",
+        "userInterfaceStyle": "light",
+        "ios": {
+            "supportsTablet": true
+        },
+        "android": {
+            "adaptiveIcon": {
+                "backgroundColor": "#E6F4FE",
+                "foregroundImage": "./assets/android-icon-foreground.png",
+                "backgroundImage": "./assets/android-icon-background.png",
+                "monochromeImage": "./assets/android-icon-monochrome.png"
+            },
+            "predictiveBackGestureEnabled": false,
+            "permissions": [
+                "android.permission.ACCESS_COARSE_LOCATION",
+                "android.permission.ACCESS_FINE_LOCATION",
+                "android.permission.ACCESS_BACKGROUND_LOCATION",
+                "android.permission.FOREGROUND_SERVICE",
+                "android.permission.FOREGROUND_SERVICE_LOCATION",
+                "android.permission.ACTIVITY_RECOGNITION",
+                "com.google.android.gms.permission.ACTIVITY_RECOGNITION",
+                "android.permission.CAMERA"
+            ],
+            "package": "com.dhiloshan.Free360"
+        },
+        "plugins": [
+            [
+                "expo-location",
+                {
+                    "locationAlwaysAndWhenInUsePermission": "Allow Free360 to share your location with your circle while you travel.",
+                    "motionUsagePermission": "Allow Free360 to show whether you are walking, biking or travelling in a vehicle to your circle.",
+                    "isAndroidMotionActivityEnabled": true,
+                    "isIosBackgroundLocationEnabled": true,
+                    "isAndroidBackgroundLocationEnabled": true
+                }
+            ],
+            [
+                "expo-camera",
+                {
+                    "cameraPermission": "Allow Free360 to use your camera to scan a private circle invitation.",
+                    "recordAudioAndroid": false,
+                    "barcodeScannerEnabled": true
+                }
+            ],
+            [
+                "expo-image-picker",
+                {
+                    "photosPermission": "Allow Free360 to access your photos so you can choose a profile picture for your circle.",
+                    "microphonePermission": false
+                }
+            ],
+            "expo-router",
+            "expo-secure-store",
+            "expo-font",
+            "expo-sqlite",
+            "expo-notifications"
+        ],
+        "web": {
+            "favicon": "./assets/favicon.png"
         }
-      ],
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "Allow Free360 to use your camera to scan a private circle invitation.",
-          "recordAudioAndroid": false,
-          "barcodeScannerEnabled": true
-        }
-      ],
-      [
-        "expo-image-picker",
-        {
-          "photosPermission": "Allow Free360 to access your photos so you can choose a profile picture for your circle.",
-          "microphonePermission": false
-        }
-      ],
-      "expo-router",
-      "expo-secure-store",
-      "expo-font",
-      "expo-sqlite",
-      "expo-notifications"
-    ],
-    "web": {
-      "favicon": "./assets/favicon.png"
     }
-  }
 }

@@ -34,15 +34,24 @@ export const MEMBER_SHEET_FLING_VELOCITY = 0.5;
 export type MemberSheetHeights = { collapsed: number; expanded: number };
 
 /** Circle list: rest low to expose more map, expand below the map header. */
-export function resolveCircleSheetHeights(containerHeight: number, topInset: number): MemberSheetHeights {
-  if (!Number.isFinite(containerHeight) || containerHeight <= 0) {
-    return { collapsed: 280, expanded: 280 };
-  }
-  const safeTop = Number.isFinite(topInset) && topInset > 0 ? topInset : 0;
-  const collapsed = Math.min(Math.max(280, containerHeight * 0.34), containerHeight * 0.6);
-  const available = Math.min(containerHeight * 0.88, containerHeight - safeTop - 84);
-  const expanded = available - collapsed >= 24 ? available : collapsed;
-  return { collapsed, expanded };
+export function resolveCircleSheetHeights(
+    containerHeight: number,
+    topInset: number,
+): MemberSheetHeights {
+    if (!Number.isFinite(containerHeight) || containerHeight <= 0) {
+        return { collapsed: 280, expanded: 280 };
+    }
+    const safeTop = Number.isFinite(topInset) && topInset > 0 ? topInset : 0;
+    const collapsed = Math.min(
+        Math.max(280, containerHeight * 0.34),
+        containerHeight * 0.6,
+    );
+    const available = Math.min(
+        containerHeight * 0.88,
+        containerHeight - safeTop - 84,
+    );
+    const expanded = available - collapsed >= 24 ? available : collapsed;
+    return { collapsed, expanded };
 }
 
 /**
@@ -53,37 +62,48 @@ export function resolveCircleSheetHeights(containerHeight: number, topInset: num
  * degenerate containers the two snaps coincide (callers then offer no drag).
  */
 export function resolveMemberSheetHeights(
-  containerHeight: number,
-  topInset: number,
+    containerHeight: number,
+    topInset: number,
 ): MemberSheetHeights {
-  if (!Number.isFinite(containerHeight) || containerHeight <= 0) {
-    return { collapsed: 0, expanded: 0 };
-  }
-  const safeTop = Number.isFinite(topInset) && topInset > 0 ? topInset : 0;
-  const collapsed = Math.round(containerHeight * MEMBER_SHEET_COLLAPSED_FRACTION);
-  const desired = Math.round(containerHeight * MEMBER_SHEET_EXPANDED_FRACTION);
-  const bounded = Math.min(desired, containerHeight - safeTop - MEMBER_SHEET_TOP_RESERVE_PX);
-  if (bounded - collapsed < MEMBER_SHEET_MIN_EXPAND_DELTA_PX) {
-    return { collapsed, expanded: collapsed };
-  }
-  return { collapsed, expanded: Math.round(bounded) };
+    if (!Number.isFinite(containerHeight) || containerHeight <= 0) {
+        return { collapsed: 0, expanded: 0 };
+    }
+    const safeTop = Number.isFinite(topInset) && topInset > 0 ? topInset : 0;
+    const collapsed = Math.round(
+        containerHeight * MEMBER_SHEET_COLLAPSED_FRACTION,
+    );
+    const desired = Math.round(
+        containerHeight * MEMBER_SHEET_EXPANDED_FRACTION,
+    );
+    const bounded = Math.min(
+        desired,
+        containerHeight - safeTop - MEMBER_SHEET_TOP_RESERVE_PX,
+    );
+    if (bounded - collapsed < MEMBER_SHEET_MIN_EXPAND_DELTA_PX) {
+        return { collapsed, expanded: collapsed };
+    }
+    return { collapsed, expanded: Math.round(bounded) };
 }
 
 /** Clamp a live drag height into the current snap range. */
-export function clampMemberSheetHeight(value: number, collapsed: number, expanded: number): number {
-  if (!Number.isFinite(value)) return collapsed;
-  if (value < collapsed) return collapsed;
-  if (value > expanded) return expanded;
-  return value;
+export function clampMemberSheetHeight(
+    value: number,
+    collapsed: number,
+    expanded: number,
+): number {
+    if (!Number.isFinite(value)) return collapsed;
+    if (value < collapsed) return collapsed;
+    if (value > expanded) return expanded;
+    return value;
 }
 
 export type MemberSheetSnapInput = {
-  /** Snap state at drag start. */
-  expanded: boolean;
-  /** Accumulated gesture dy (px, negative = dragged up). */
-  dragDy: number;
-  /** Release velocity vy (px/ms, negative = upward fling). */
-  velocityY: number;
+    /** Snap state at drag start. */
+    expanded: boolean;
+    /** Accumulated gesture dy (px, negative = dragged up). */
+    dragDy: number;
+    /** Release velocity vy (px/ms, negative = upward fling). */
+    velocityY: number;
 };
 
 /**
@@ -92,11 +112,12 @@ export type MemberSheetSnapInput = {
  * Non-finite input keeps the current state (safe no-op).
  */
 export function nextMemberSheetExpanded(input: MemberSheetSnapInput): boolean {
-  const { expanded, dragDy, velocityY } = input;
-  if (!Number.isFinite(dragDy) || !Number.isFinite(velocityY)) return expanded;
-  if (velocityY <= -MEMBER_SHEET_FLING_VELOCITY) return true;
-  if (velocityY >= MEMBER_SHEET_FLING_VELOCITY) return false;
-  if (dragDy <= -MEMBER_SHEET_SNAP_DRAG_THRESHOLD_PX) return true;
-  if (dragDy >= MEMBER_SHEET_SNAP_DRAG_THRESHOLD_PX) return false;
-  return expanded;
+    const { expanded, dragDy, velocityY } = input;
+    if (!Number.isFinite(dragDy) || !Number.isFinite(velocityY))
+        return expanded;
+    if (velocityY <= -MEMBER_SHEET_FLING_VELOCITY) return true;
+    if (velocityY >= MEMBER_SHEET_FLING_VELOCITY) return false;
+    if (dragDy <= -MEMBER_SHEET_SNAP_DRAG_THRESHOLD_PX) return true;
+    if (dragDy >= MEMBER_SHEET_SNAP_DRAG_THRESHOLD_PX) return false;
+    return expanded;
 }

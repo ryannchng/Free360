@@ -26,71 +26,73 @@
 // pass `{ force: true }` (reserved for explicit user actions, not startup).
 
 export type StartupPermissionState = {
-  granted: boolean;
-  canAskAgain?: boolean;
+    granted: boolean;
+    canAskAgain?: boolean;
 };
 
 export type StartupLocationAdapter = {
-  getForegroundPermissionsAsync(): Promise<StartupPermissionState>;
-  requestForegroundPermissionsAsync(): Promise<StartupPermissionState>;
+    getForegroundPermissionsAsync(): Promise<StartupPermissionState>;
+    requestForegroundPermissionsAsync(): Promise<StartupPermissionState>;
 };
 
 export type StartupPermissionOutcome =
-  | 'already-granted'
-  | 'granted-after-request'
-  | 'denied-after-request'
-  | 'permanently-denied'
-  | 'skipped'
-  | 'unavailable'
-  | 'error';
+    | "already-granted"
+    | "granted-after-request"
+    | "denied-after-request"
+    | "permanently-denied"
+    | "skipped"
+    | "unavailable"
+    | "error";
 
 export type StartupPermissionResult = {
-  outcome: StartupPermissionOutcome;
-  /** True only when a system permission prompt was actually shown. */
-  asked: boolean;
+    outcome: StartupPermissionOutcome;
+    /** True only when a system permission prompt was actually shown. */
+    asked: boolean;
 };
 
 export type EnsureStartupPermissionsOptions = {
-  adapter?: StartupLocationAdapter;
-  /** Overrides the detected platform. `'web'` skips native permission work. */
-  platform?: string;
-  /** Re-run even if a startup check already completed in this session. */
-  force?: boolean;
+    adapter?: StartupLocationAdapter;
+    /** Overrides the detected platform. `'web'` skips native permission work. */
+    platform?: string;
+    /** Re-run even if a startup check already completed in this session. */
+    force?: boolean;
 };
 
 // Pure decision rule, kept side-effect free so it is unit testable:
 // only ask when the OS will actually show a prompt.
-export function shouldAskForPermission(state: StartupPermissionState | null | undefined): boolean {
-  if (!state || state.granted) return false;
-  return state.canAskAgain === true;
+export function shouldAskForPermission(
+    state: StartupPermissionState | null | undefined,
+): boolean {
+    if (!state || state.granted) return false;
+    return state.canAskAgain === true;
 }
 
 let cachedAdapter: StartupLocationAdapter | null | undefined;
 
 function loadLocationAdapter(): StartupLocationAdapter | null {
-  if (cachedAdapter !== undefined) return cachedAdapter;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const location = require('expo-location') as StartupLocationAdapter;
-    cachedAdapter =
-      typeof location?.getForegroundPermissionsAsync === 'function' &&
-      typeof location?.requestForegroundPermissionsAsync === 'function'
-        ? location
-        : null;
-  } catch {
-    cachedAdapter = null;
-  }
-  return cachedAdapter;
+    if (cachedAdapter !== undefined) return cachedAdapter;
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const location = require("expo-location") as StartupLocationAdapter;
+        cachedAdapter =
+            typeof location?.getForegroundPermissionsAsync === "function" &&
+            typeof location?.requestForegroundPermissionsAsync === "function"
+                ? location
+                : null;
+    } catch {
+        cachedAdapter = null;
+    }
+    return cachedAdapter;
 }
 
 function currentPlatform(): string {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const rn = require('react-native') as { Platform?: { OS?: string } };
-    return rn.Platform?.OS ?? 'native';
-  } catch {
-    return 'native';
-  }
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const rn = require("react-native") as { Platform?: { OS?: string } };
+        return rn.Platform?.OS ?? "native";
+    } catch {
+        return "native";
+    }
 }
 
 let inFlight: Promise<StartupPermissionResult> | null = null;
@@ -98,47 +100,54 @@ let completed = false;
 let lastResult: StartupPermissionResult | null = null;
 
 async function runStartupPermissions(
-  options: EnsureStartupPermissionsOptions,
+    options: EnsureStartupPermissionsOptions,
 ): Promise<StartupPermissionResult> {
-  try {
-    if ((options.platform ?? currentPlatform()) === 'web') {
-      return { outcome: 'skipped', asked: false };
+    try {
+        if ((options.platform ?? currentPlatform()) === "web") {
+            return { outcome: "skipped", asked: false };
+        }
+        const adapter = options.adapter ?? loadLocationAdapter();
+        if (!adapter) return { outcome: "unavailable", asked: false };
+        const current = await adapter.getForegroundPermissionsAsync();
+        if (current.granted)
+            return { outcome: "already-granted", asked: false };
+        if (!shouldAskForPermission(current)) {
+            return { outcome: "permanently-denied", asked: false };
+        }
+        const next = await adapter.requestForegroundPermissionsAsync();
+        return {
+            outcome: next.granted
+                ? "granted-after-request"
+                : "denied-after-request",
+            asked: true,
+        };
+    } catch (error) {
+        console.warn(
+            "[Free360] Startup permission check failed:",
+            error instanceof Error ? error.message : error,
+        );
+        return { outcome: "error", asked: false };
     }
-    const adapter = options.adapter ?? loadLocationAdapter();
-    if (!adapter) return { outcome: 'unavailable', asked: false };
-    const current = await adapter.getForegroundPermissionsAsync();
-    if (current.granted) return { outcome: 'already-granted', asked: false };
-    if (!shouldAskForPermission(current)) {
-      return { outcome: 'permanently-denied', asked: false };
-    }
-    const next = await adapter.requestForegroundPermissionsAsync();
-    return { outcome: next.granted ? 'granted-after-request' : 'denied-after-request', asked: true };
-  } catch (error) {
-    console.warn(
-      '[Free360] Startup permission check failed:',
-      error instanceof Error ? error.message : error,
-    );
-    return { outcome: 'error', asked: false };
-  }
 }
 
 export function ensureStartupPermissions(
-  options: EnsureStartupPermissionsOptions = {},
+    options: EnsureStartupPermissionsOptions = {},
 ): Promise<StartupPermissionResult> {
-  if (inFlight) return inFlight;
-  if (completed && !options.force && lastResult) return Promise.resolve(lastResult);
-  inFlight = runStartupPermissions(options).then((result) => {
-    inFlight = null;
-    completed = true;
-    lastResult = result;
-    return result;
-  });
-  return inFlight;
+    if (inFlight) return inFlight;
+    if (completed && !options.force && lastResult)
+        return Promise.resolve(lastResult);
+    inFlight = runStartupPermissions(options).then((result) => {
+        inFlight = null;
+        completed = true;
+        lastResult = result;
+        return result;
+    });
+    return inFlight;
 }
 
 // Test-only reset for the module-level singleflight state.
 export function __resetStartupPermissionsForTests(): void {
-  inFlight = null;
-  completed = false;
-  lastResult = null;
+    inFlight = null;
+    completed = false;
+    lastResult = null;
 }

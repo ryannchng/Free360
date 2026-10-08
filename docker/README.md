@@ -9,20 +9,20 @@ The server stores random device IDs, hashes of device tokens and invitation secr
 1. Install Docker with Compose on the host. Copy `docker/.env.example` to `docker/.env` and replace the placeholder with a random setup code. Generate one with `openssl rand -hex 32`, or with Node.js using `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`. Save the code privately; the owner enters it once in the app.
 2. From this repository's `docker` directory, start the container:
 
-   ```sh
-   docker compose up -d --build
-   docker compose ps
-   ```
+    ```sh
+    docker compose up -d --build
+    docker compose ps
+    ```
 
 3. Put an HTTPS reverse proxy in front of `127.0.0.1:8080` and use a public URL that every group phone can reach, such as `https://group.example.com`. For example, with Caddy installed on the host, a Caddyfile can contain:
 
-   ```caddyfile
-   group.example.com {
-       reverse_proxy 127.0.0.1:8080
-   }
-   ```
+    ```caddyfile
+    group.example.com {
+        reverse_proxy 127.0.0.1:8080
+    }
+    ```
 
-   Point that name to the host and allow ports 80 and 443 through its firewall so Caddy can obtain a certificate. See [Caddy's HTTPS guide](https://caddyserver.com/docs/quick-starts/https). The Compose file binds only to loopback so the HTTP API is not exposed directly. Forward request bodies and the `Authorization` header if you use another proxy. A phone on a mobile network cannot reach the server through `localhost` or a private LAN address.
+    Point that name to the host and allow ports 80 and 443 through its firewall so Caddy can obtain a certificate. See [Caddy's HTTPS guide](https://caddyserver.com/docs/quick-starts/https). The Compose file binds only to loopback so the HTTP API is not exposed directly. Forward request bodies and the `Authorization` header if you use another proxy. A phone on a mobile network cannot reach the server through `localhost` or a private LAN address.
 
 4. Check `https://group.example.com/health`; it should return `{"ok":true}`. The SQLite database lives in the `free360-data` Docker volume and survives container replacement. Back up that volume regularly.
 

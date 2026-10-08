@@ -1,72 +1,135 @@
-import { AVATAR_COLORS, COLORS, FONTS, RADII, SHADOWS } from './src/theme';
-import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
-import { usePathname, useRouter } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AVATAR_COLORS, COLORS, FONTS, RADII, SHADOWS } from "./src/theme";
+import { Ionicons } from "@expo/vector-icons";
+import * as Location from "expo-location";
+import { usePathname, useRouter } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import React, {
+    useCallback,
+    useEffect,
+    useMemo,
+    useRef,
+    useState,
+} from "react";
 import {
-  Alert,
-  Animated,
-  Easing,
-  KeyboardAvoidingView,
-  Modal,
-  PanResponder,
-  type PanResponderInstance,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
-} from 'react-native';
-import { MemberAvatar } from './src/components/MemberAvatar';
-import { BatteryBadge } from './src/components/BatteryBadge';
-import { MapFilterBar, type MapFilter } from './src/components/MapFilterBar';
-import { OpenStreetMap, type OpenStreetMapHandle, type MapMember } from './src/components/OpenStreetMap';
-import { avatarForProfile, displayNameFor, initialsForName } from './src/lib/member-display';
-import { clampMemberSheetHeight, nextMemberSheetExpanded, resolveCircleSheetHeights, resolveMemberSheetHeights } from './src/lib/member-sheet';
-import { useDraggableSheet } from './src/hooks/use-draggable-sheet';
-import { isValidCoordinate, resolveMapCenter } from './src/lib/map-region';
-import { BACKGROUND_LOCATION_TASK } from './src/lib/background-location';
-import { type CheckIn, type CircleConfig, type CircleSnapshot, fetchCircleSnapshots, fetchLocationHistory, type HistoryPoint, loadCircle, publishCheckIn, publishLocation, publishPaused, subscribeToCircle } from './src/lib/circle';
-import { loadDeviceProfile, refreshDeviceSnapshot, type DeviceProfile, type Home } from './src/lib/circle';
-import { refreshHomeMonitoring, syncHomes, flushHomeAlerts } from './src/lib/home-alerts';
-import * as Battery from 'expo-battery';
-import { EMPTY_MOVEMENT, freshMovement, isStationaryMovement, parseMovement, type Movement } from './src/lib/movement';
-import { locationWithMovement, resetLocationMovement, updateMotionActivity } from './src/lib/location-movement';
-import { secureStorage } from './src/lib/secure-storage';
-import { SELF_STAY_KEY, ADDRESS_FAILURE_RETRY_MS, addressBucket, createAddressResolver, observedStaySince, parseStay, selfStatusLine, sinceLabel, stayDurationLabel, updateStay, type StayState } from './src/lib/location-stay';
+    SafeAreaView,
+    useSafeAreaInsets,
+} from "react-native-safe-area-context";
+import {
+    Alert,
+    Animated,
+    Easing,
+    KeyboardAvoidingView,
+    Modal,
+    PanResponder,
+    type PanResponderInstance,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TextInput,
+    useWindowDimensions,
+    View,
+} from "react-native";
+import { MemberAvatar } from "./src/components/MemberAvatar";
+import { BatteryBadge } from "./src/components/BatteryBadge";
+import { MapFilterBar, type MapFilter } from "./src/components/MapFilterBar";
+import {
+    OpenStreetMap,
+    type OpenStreetMapHandle,
+    type MapMember,
+} from "./src/components/OpenStreetMap";
+import {
+    avatarForProfile,
+    displayNameFor,
+    initialsForName,
+} from "./src/lib/member-display";
+import {
+    clampMemberSheetHeight,
+    nextMemberSheetExpanded,
+    resolveCircleSheetHeights,
+    resolveMemberSheetHeights,
+} from "./src/lib/member-sheet";
+import { useDraggableSheet } from "./src/hooks/use-draggable-sheet";
+import { isValidCoordinate, resolveMapCenter } from "./src/lib/map-region";
+import { BACKGROUND_LOCATION_TASK } from "./src/lib/background-location";
+import {
+    type CheckIn,
+    type CircleConfig,
+    type CircleSnapshot,
+    fetchCircleSnapshots,
+    fetchLocationHistory,
+    type HistoryPoint,
+    loadCircle,
+    publishCheckIn,
+    publishLocation,
+    publishPaused,
+    subscribeToCircle,
+} from "./src/lib/circle";
+import {
+    loadDeviceProfile,
+    refreshDeviceSnapshot,
+    type DeviceProfile,
+    type Home,
+} from "./src/lib/circle";
+import {
+    refreshHomeMonitoring,
+    syncHomes,
+    flushHomeAlerts,
+} from "./src/lib/home-alerts";
+import * as Battery from "expo-battery";
+import {
+    EMPTY_MOVEMENT,
+    freshMovement,
+    isStationaryMovement,
+    parseMovement,
+    type Movement,
+} from "./src/lib/movement";
+import {
+    locationWithMovement,
+    resetLocationMovement,
+    updateMotionActivity,
+} from "./src/lib/location-movement";
+import { secureStorage } from "./src/lib/secure-storage";
+import {
+    SELF_STAY_KEY,
+    ADDRESS_FAILURE_RETRY_MS,
+    addressBucket,
+    createAddressResolver,
+    observedStaySince,
+    parseStay,
+    selfStatusLine,
+    sinceLabel,
+    stayDurationLabel,
+    updateStay,
+    type StayState,
+} from "./src/lib/location-stay";
 
-type Tab = 'map' | 'circle' | 'activity' | 'you';
+type Tab = "map" | "circle" | "activity" | "you";
 type IconName = keyof typeof Ionicons.glyphMap;
 
 type Member = {
-  id: string;
-  name: string;
-  initials: string;
-  role: string;
-  status: string;
-  lastSeen: string;
-  coordinate: { latitude: number; longitude: number } | null;
-  color: string;
-  avatar?: string | null;
-  isYou?: boolean;
-  isPaused?: boolean;
-  isStale?: boolean;
-  battery?: number | null;
-  home?: Home | null;
-  historyCount: number;
-  movement?: Movement;
-  staySinceMs?: number | null;
+    id: string;
+    name: string;
+    initials: string;
+    role: string;
+    status: string;
+    lastSeen: string;
+    coordinate: { latitude: number; longitude: number } | null;
+    color: string;
+    avatar?: string | null;
+    isYou?: boolean;
+    isPaused?: boolean;
+    isStale?: boolean;
+    battery?: number | null;
+    home?: Home | null;
+    historyCount: number;
+    movement?: Movement;
+    staySinceMs?: number | null;
 };
 
-
-
-const SELF_FALLBACK_NAME = 'You';
+const SELF_FALLBACK_NAME = "You";
 const STALE_AFTER_MS = 5 * 60 * 1000;
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -75,15 +138,18 @@ const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 // failures resolve to null so the row falls back to "current location".
 // Addresses stay on this device for display and are never published.
 const selfAddressResolver = createAddressResolver((coordinate) => {
-  if (Platform.OS === 'web') return Promise.resolve(null);
-  return Location.reverseGeocodeAsync(coordinate);
+    if (Platform.OS === "web") return Promise.resolve(null);
+    return Location.reverseGeocodeAsync(coordinate);
 });
 
 function ageLabel(recordedAt: string, now: number) {
-  const minutes = Math.max(0, Math.floor((now - Date.parse(recordedAt)) / 60000));
-  if (minutes < 1) return 'Updated less than a minute ago';
-  if (minutes < 60) return `Updated ${minutes} min ago`;
-  return `Updated ${Math.floor(minutes / 60)} hr ago`;
+    const minutes = Math.max(
+        0,
+        Math.floor((now - Date.parse(recordedAt)) / 60000),
+    );
+    if (minutes < 1) return "Updated less than a minute ago";
+    if (minutes < 60) return `Updated ${minutes} min ago`;
+    return `Updated ${Math.floor(minutes / 60)} hr ago`;
 }
 
 // Map header subtitle reuses the existing member.lastSeen value without
@@ -91,985 +157,4148 @@ function ageLabel(recordedAt: string, now: number) {
 // ago"; non-time values ("On this device", "No live location", "") are
 // returned as-is so the header never reads "Last updated On this device".
 function memberHeaderSubtitle(lastSeen: string) {
-  const trimmed = lastSeen.trim();
-  if (!trimmed) return 'Last updated —';
-  const updated = trimmed.match(/^(?:last\s+updated|updated)\s+(.+)$/i);
-  if (updated) return `Last updated ${updated[1]}`;
-  const seen = trimmed.match(/^last\s+seen\s+(.+)$/i);
-  if (seen) return `Last updated ${seen[1]}`;
-  return trimmed;
+    const trimmed = lastSeen.trim();
+    if (!trimmed) return "Last updated —";
+    const updated = trimmed.match(/^(?:last\s+updated|updated)\s+(.+)$/i);
+    if (updated) return `Last updated ${updated[1]}`;
+    const seen = trimmed.match(/^last\s+seen\s+(.+)$/i);
+    if (seen) return `Last updated ${seen[1]}`;
+    return trimmed;
 }
 
-function Icon({ name, size = 21, color = COLORS.ink }: { name: IconName; size?: number; color?: string }) {
-  return <Ionicons name={name} size={size} color={color} />;
+function Icon({
+    name,
+    size = 21,
+    color = COLORS.ink,
+}: {
+    name: IconName;
+    size?: number;
+    color?: string;
+}) {
+    return <Ionicons name={name} size={size} color={color} />;
 }
 
 function movementDisplay(member: Member) {
-  const movement = member.movement ?? EMPTY_MOVEMENT;
-  const icons: Record<NonNullable<Movement['activity']>, IconName> = { stationary: 'pause', walking: 'walk', running: 'walk', biking: 'bicycle', driving: 'car' };
-  const labels = { stationary: 'Still', walking: 'Walking', running: 'Running', biking: 'Biking', driving: 'In a vehicle' };
-  const label = movement.activity ? `${labels[movement.activity]}${movement.activitySource === 'speed' ? ' (estimated)' : ''}` : 'Activity unavailable';
-  return { activity: movement.activity, icon: movement.activity ? icons[movement.activity] : 'help-circle-outline' as IconName, label, speed: movement.speed === null ? '— km/h' : `${Math.round(movement.speed * 3.6)} km/h`, estimated: movement.activitySource === 'speed' };
+    const movement = member.movement ?? EMPTY_MOVEMENT;
+    const icons: Record<NonNullable<Movement["activity"]>, IconName> = {
+        stationary: "pause",
+        walking: "walk",
+        running: "walk",
+        biking: "bicycle",
+        driving: "car",
+    };
+    const labels = {
+        stationary: "Still",
+        walking: "Walking",
+        running: "Running",
+        biking: "Biking",
+        driving: "In a vehicle",
+    };
+    const label = movement.activity
+        ? `${labels[movement.activity]}${movement.activitySource === "speed" ? " (estimated)" : ""}`
+        : "Activity unavailable";
+    return {
+        activity: movement.activity,
+        icon: movement.activity
+            ? icons[movement.activity]
+            : ("help-circle-outline" as IconName),
+        label,
+        speed:
+            movement.speed === null
+                ? "— km/h"
+                : `${Math.round(movement.speed * 3.6)} km/h`,
+        estimated: movement.activitySource === "speed",
+    };
 }
 
-function MemberRowAvatar({ member, size = 48 }: { member: Member; size?: number }) {
-  return (
-    <MemberAvatar
-      name={member.name}
-      initials={member.initials}
-      avatar={member.avatar ?? null}
-      color={member.color}
-      size={size}
-      badgeText={member.battery != null ? `${member.battery}%` : null}
-    />
-  );
+function MemberRowAvatar({
+    member,
+    size = 48,
+}: {
+    member: Member;
+    size?: number;
+}) {
+    return (
+        <MemberAvatar
+            name={member.name}
+            initials={member.initials}
+            avatar={member.avatar ?? null}
+            color={member.color}
+            size={size}
+            badgeText={member.battery != null ? `${member.battery}%` : null}
+        />
+    );
 }
 
-function SectionTitle({ eyebrow, title, action, onAction }: { eyebrow?: string; title: string; action?: string; onAction?: () => void }) {
-  return (
-    <View style={styles.sectionTitleRow}>
-      <View>
-        {eyebrow && <Text style={styles.eyebrow}>{eyebrow}</Text>}
-        <Text style={styles.sectionTitle}>{title}</Text>
-      </View>
-      {action && <Pressable onPress={onAction} hitSlop={8}><Text style={styles.actionText}>{action}</Text></Pressable>}
-    </View>
-  );
-}
-
-function Header({ circleName, selfMember, onSettings }: { circleName: string; selfMember: Member; onSettings: () => void }) {
-  return (
-    <View style={styles.header}>
-      <View style={styles.brandMark}><Icon name="navigate" size={17} color={COLORS.white} /></View>
-      <View style={styles.brandCopy}><Text style={styles.brandName}>Free360</Text><Text style={styles.brandSubline}>{circleName.toUpperCase()}</Text></View>
-      <Pressable style={styles.headerAvatarButton} onPress={onSettings} hitSlop={8} accessibilityLabel="Open your profile"><MemberAvatar name={selfMember.name} initials={selfMember.initials} avatar={selfMember.avatar ?? null} color={selfMember.color} size={38} /></Pressable>
-    </View>
-  );
-}
-
-function MapScreen({ currentCoordinate, locationEnabled, circleName, circleMembers, circleConnected, selfHome, trailMember, trailCoordinates, selfStaySince, selfAddress, nowMs, selectedMember, selectedHistory, onRequestLocation, onCheckIn, onOpenMember, onOpenCircle, onOpenSettings, onInvite, onCreateCircle, onJoinCircle, onHideTrail, onCloseMember, onRefreshMember, onShowTrail, isOwner }: { currentCoordinate: { latitude: number; longitude: number } | null; locationEnabled: boolean; circleName: string; circleMembers: Member[]; circleConnected: boolean; selfHome: Home | null; trailMember: Member | null; trailCoordinates: { latitude: number; longitude: number }[]; selfStaySince: number | null; selfAddress: string | null; nowMs: number; selectedMember: Member | null; selectedHistory: HistoryPoint[]; onRequestLocation: () => void; onCheckIn: () => void; onOpenMember: (member: Member) => void; onOpenCircle: () => void; onOpenSettings: () => void; onInvite: () => void; onCreateCircle: () => void; onJoinCircle: () => void; onHideTrail: () => void; onCloseMember: () => void; onRefreshMember: () => void; onShowTrail: (member: Member) => void; isOwner: boolean }) {
-  const mapRef = useRef<OpenStreetMapHandle>(null);
-  // Derive the empty-state flag purely from already-available values: live device
-  // location (only when sharing), then the first valid shared member location,
-  // then a saved home, else a broad fallback. Never requests location here.
-  // The map view itself is framed by the OpenStreetMap component, which fits
-  // all members on arrival and preserves manual pan/zoom until recentered.
-  const sharedCoordinates = circleMembers.filter((member) => !member.isPaused).map((member) => (member.isYou ? currentCoordinate : member.coordinate));
-  const homeCoordinate = circleMembers.find((member) => member.home && isValidCoordinate(member.home))?.home ?? (isValidCoordinate(selfHome) ? selfHome : null);
-  const resolved = resolveMapCenter({ currentCoordinate, locationEnabled, sharedCoordinates, home: homeCoordinate });
-  const hasRealLocation = resolved.source !== 'fallback';
-
-  const recenter = () => {
-    mapRef.current?.fitGroup();
-  };
-
-  const actionLabel = !circleName ? 'Create circle' : isOwner ? 'Invite someone' : locationEnabled ? 'Your circle' : 'Share location';
-  const actionIcon: IconName = !circleName ? 'add' : isOwner ? 'person-add-outline' : locationEnabled ? 'people-outline' : 'location-outline';
-  const action = !circleName ? onCreateCircle : isOwner ? onInvite : locationEnabled ? onOpenCircle : onRequestLocation;
-  const validTrail = trailCoordinates.filter(isValidCoordinate);
-  // Top inset is applied manually to the floating overlays below: the root
-  // SafeAreaView skips the top edge on the map tab so tiles render behind the
-  // status bar instead of leaving a solid bar above the map.
-  const topInset = useSafeAreaInsets().top;
-  const narrowScreen = useWindowDimensions().width < 360;
-  const mapMembers: MapMember[] = circleMembers.filter(member => !member.isPaused).flatMap(member => {
-    const coordinate = member.isYou ? currentCoordinate : member.coordinate;
-    if (!isValidCoordinate(coordinate)) return [];
-    const movement = movementDisplay(member);
-    const activity = { pause: '⏸', walk: '🚶', bicycle: '🚲', car: '🚗' }[movement.icon as string] ?? '?';
-    // Stationary members show no pause icon or km/h bubble; the empty string
-    // tells the map document to omit the badge while avatar/name/status stay.
-    const staySince = member.isYou ? selfStaySince : member.staySinceMs;
-    const stayDuration = member.isStale ? null : stayDurationLabel(staySince, nowMs);
-    const badge = stayDuration || isStationaryMovement(member.movement) || member.movement?.speed == null ? '' : `${activity} ${movement.estimated ? '~' : ''}${movement.speed}`;
-    return [{ id: member.id, coordinate, name: member.name, initials: member.initials, avatar: member.avatar ?? null, color: member.color, stale: !!member.isStale, battery: member.battery, movement: badge, stayDuration, description: stayDuration ? `Here for ${stayDuration}` : `${movement.label} · ${movement.speed}` }];
-  });
-
-  const [containerHeight, setContainerHeight] = useState(0);
-  const [filter, setFilter] = useState<MapFilter>('people');
-  const sheetSnaps = resolveCircleSheetHeights(containerHeight, topInset);
-  const memberPanel = useDraggableSheet(sheetSnaps);
-  const compactSheet = sheetSnaps.collapsed < 300;
-  const controlsBottom = useMemo(() => Animated.add(memberPanel.height, 16), [memberPanel.height]);
-
-  return (
-    <View style={styles.mapScreen} onLayout={({ nativeEvent }) => { const next = nativeEvent.layout.height; setContainerHeight((prev) => (Math.abs(prev - next) > 1 ? next : prev)); }}>
-      <OpenStreetMap ref={mapRef} data={{ members: mapMembers, homes: circleMembers.filter(member => isValidCoordinate(member.home)).map(member => ({ coordinate: member.home!, name: member.name })), trail: validTrail, trailColor: trailMember?.color ?? COLORS.purple, bottomInset: selectedMember ? containerHeight * 0.52 : memberPanel.settledHeight, topInset: topInset + 72, highlightedMemberId: selectedMember?.id ?? circleMembers.find(member => member.isYou && !member.isPaused)?.id }} onOpenMember={id => { const member = circleMembers.find(member => member.id === id); if (member) onOpenMember(member); }} />
-      {!hasRealLocation && <View style={[styles.mapEmptyOverlay, { top: 132 + topInset }]} pointerEvents="none"><Icon name={circleName ? 'location-outline' : 'people-outline'} size={16} color={COLORS.deepPurple} /><Text style={styles.mapEmptyOverlayText}>{circleName ? 'No shared locations yet — map stays visible' : 'Start a private circle to see locations'}</Text></View>}
-
-      {selectedMember ? <View style={[styles.mapMemberHeader, { top: 12 + topInset }]} accessible accessibilityLabel={`${selectedMember.name}, ${memberHeaderSubtitle(selectedMember.lastSeen)}`}><Pressable style={styles.mapMemberBack} hitSlop={8} onPress={onCloseMember} accessibilityLabel="Back"><Icon name="chevron-back" size={24} color={COLORS.deepPurple} /></Pressable><View style={styles.mapMemberHeaderCopy}><Text style={styles.mapMemberHeaderName} numberOfLines={1}>{selectedMember.name}</Text><Text style={styles.mapMemberHeaderSubtitle} numberOfLines={1}>{memberHeaderSubtitle(selectedMember.lastSeen)}</Text></View><Pressable style={styles.mapMemberRefresh} hitSlop={8} onPress={onRefreshMember} accessibilityLabel="Refresh location"><Icon name="refresh" size={20} color={COLORS.white} /></Pressable></View> : <View style={[styles.mapTopBar, { top: 12 + topInset }]}>
-        <Pressable style={styles.mapRoundButton} hitSlop={8} onPress={onOpenSettings} accessibilityRole="button" accessibilityLabel="Open settings"><Icon name="settings-sharp" size={22} color={COLORS.purple} /></Pressable>
-        <Pressable style={styles.mapCirclePicker} hitSlop={5} onPress={onOpenCircle} accessibilityRole="button" accessibilityLabel="Open circle"><Text style={[styles.mapCirclePickerText, narrowScreen && { fontSize: 13 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{circleName || 'Your circle'}</Text><Icon name="caret-down" size={12} color={COLORS.purple} /></Pressable>
-        <View style={styles.mapTopSpacer} />
-      </View>}
-
-      <View style={[styles.mapTopOverlay, { top: 73 + topInset }]}>
-        {circleName && !circleConnected ? <View style={styles.safePill}><View style={[styles.safeIcon, { backgroundColor: COLORS.yellowSoft }]}><Icon name="cloud-offline-outline" size={16} color={COLORS.yellow} /></View><View><Text style={styles.safePillLabel}>CIRCLE OFFLINE</Text><Text style={styles.safePillValue}>Updates may be delayed</Text></View></View> : null}
-        {!locationEnabled && <Pressable style={styles.locationPrompt} onPress={onRequestLocation}><Icon name="location-outline" size={17} color={COLORS.purple} /><Text style={styles.locationPromptText}>Turn on location sharing</Text><Icon name="arrow-forward" size={16} color={COLORS.purple} /></Pressable>}
-        {trailMember && <Pressable style={styles.trailPill} onPress={onHideTrail} accessibilityLabel="Hide 24-hour trail"><Icon name="footsteps" size={15} color={COLORS.white} /><Text style={styles.trailPillText} numberOfLines={1}>{trailMember.name} · 24-hour trail</Text><Icon name="close" size={14} color={COLORS.white} /></Pressable>}
-      </View>
-
-      {!selectedMember ? <Animated.View style={[styles.mapControls, { bottom: controlsBottom }]}><Pressable style={styles.mapControlButton} onPress={recenter} accessibilityRole="button" accessibilityLabel="Center map on a shared location" hitSlop={6}><Icon name="locate" size={24} color={COLORS.purple} /></Pressable></Animated.View> : null}
-
-{selectedMember ? <MapMemberSheet key={selectedMember.id} member={selectedMember} history={selectedHistory} onShowTrail={onShowTrail} containerHeight={containerHeight} topInset={topInset} /> :       <Animated.View style={[styles.mapBottomCard, { height: memberPanel.height }]}>
-        <View style={styles.cardHandleHit} {...memberPanel.panHandlers}>
-          <Pressable style={styles.cardHandleButton} onPress={memberPanel.toggle} disabled={!memberPanel.canExpand} accessibilityRole="button" accessibilityLabel={memberPanel.isExpanded ? 'Collapse member list' : 'Expand member list'} accessibilityHint="Drag up to show more members, or drag down to collapse. You can also double tap to toggle." accessibilityState={{ expanded: memberPanel.isExpanded, disabled: !memberPanel.canExpand }} accessibilityActions={[{ name: 'expand', label: 'Show more members' }, { name: 'collapse', label: 'Collapse member list' }]} onAccessibilityAction={({ nativeEvent }) => { if (nativeEvent.actionName === 'expand') memberPanel.snapTo(true); else if (nativeEvent.actionName === 'collapse') memberPanel.snapTo(false); }}>
-            <View style={styles.cardHandle} />
-          </Pressable>
+function SectionTitle({
+    eyebrow,
+    title,
+    action,
+    onAction,
+}: {
+    eyebrow?: string;
+    title: string;
+    action?: string;
+    onAction?: () => void;
+}) {
+    return (
+        <View style={styles.sectionTitleRow}>
+            <View>
+                {eyebrow && <Text style={styles.eyebrow}>{eyebrow}</Text>}
+                <Text style={styles.sectionTitle}>{title}</Text>
+            </View>
+            {action && (
+                <Pressable onPress={onAction} hitSlop={8}>
+                    <Text style={styles.actionText}>{action}</Text>
+                </Pressable>
+            )}
         </View>
-        <Text style={styles.mapBottomTitle} numberOfLines={1}>{circleName || 'Your circle'}</Text>
-        <MapFilterBar value={filter} onChange={setFilter} compact={compactSheet} />
-        {circleName ? <ScrollView style={styles.mapMemberScroll} contentContainerStyle={styles.mapMemberList} showsVerticalScrollIndicator={false} nestedScrollEnabled>{filter === 'people' ? circleMembers.map((member) => {
-          // Self rows show their current place and stay time on separate lines;
-          // other members keep their own status and last-seen labels.
-          const selfLine = member.isYou ? selfStatusLine({ locationEnabled, coordinate: isValidCoordinate(currentCoordinate) ? currentCoordinate : null, activity: member.movement?.activity ?? null, staySinceMs: selfStaySince, address: selfAddress, nowMs }) : null;
-          const lastSeen = (selfLine?.lastSeen ?? (member.staySinceMs != null && !member.isStale ? sinceLabel(member.staySinceMs, nowMs) : member.lastSeen))
-            .replace(/^since /, 'Since ').replace(' AM', ' a.m.').replace(' PM', ' p.m.').replace(/ today$/, '');
-          return <Pressable key={member.id} style={styles.mapMemberRow} onPress={() => onOpenMember(member)} accessibilityRole="button" accessibilityLabel={`View ${member.name}'s location, ${selfLine?.status ?? member.status}, ${lastSeen}`}><MemberRowAvatar member={member} size={60} /><View style={styles.mapMemberCopy}><Text style={styles.mapMemberName} numberOfLines={1}>{member.name}</Text><Text style={styles.mapMemberStatus} numberOfLines={2}>{selfLine?.status ?? member.status}</Text><Text style={styles.mapMemberStatus} numberOfLines={1}>{lastSeen}</Text></View></Pressable>;
-        }) : filter === 'places' && circleMembers.some(member => isValidCoordinate(member.home)) ? circleMembers.filter(member => isValidCoordinate(member.home)).map(member => <Pressable key={member.id} style={styles.mapMemberRow} onPress={() => onOpenMember(member)} accessibilityRole="button" accessibilityLabel={`View ${member.name}'s saved home`}><View style={styles.mapPlaceIcon}><Icon name="home" size={30} color={COLORS.purple} /></View><View style={styles.mapMemberCopy}><Text style={styles.mapMemberName}>{member.name}'s home</Text><Text style={styles.mapMemberStatus}>Saved place</Text></View></Pressable>) : <View style={styles.mapFilterEmpty}><Icon name={filter === 'pets' ? 'paw' : filter === 'items' ? 'key' : 'business'} size={30} color={COLORS.subtle} /><Text style={styles.mapEmptyTitle}>{filter === 'pets' ? 'No pets to show' : filter === 'items' ? 'No items to show' : 'No saved places yet'}</Text><Text style={styles.mapEmptyText}>{filter === 'places' ? 'Set your home in your profile to see it here.' : 'This circle currently shares people’s locations.'}</Text>{filter === 'places' ? <Pressable onPress={onOpenSettings} accessibilityRole="button" style={styles.mapEmptySettings}><Text style={styles.actionText}>Set your home</Text></Pressable> : null}</View>}</ScrollView> : <Pressable style={styles.mapEmptyCard} onPress={onCreateCircle} accessibilityRole="button"><Icon name="people" size={23} color={COLORS.purple} /><View style={styles.mapEmptyCopy}><Text style={styles.mapEmptyTitle}>Start a private circle</Text><Text style={styles.mapEmptyText}>Create one to see members on the map.</Text></View><Icon name="arrow-forward" size={18} color={COLORS.purple} /></Pressable>}
-        <View style={styles.mapPanelActions}><Pressable style={styles.mapPanelAction} accessibilityRole="button" onPress={circleName ? onCheckIn : onJoinCircle}><Icon name={circleName ? 'location' : 'qr-code'} size={16} color={COLORS.purple} /><Text style={styles.mapPanelActionText}>{circleName ? 'Check in' : 'Join with QR'}</Text></Pressable><Pressable style={styles.mapPanelAction} accessibilityRole="button" onPress={action}><Icon name={actionIcon} size={16} color={COLORS.purple} /><Text style={styles.mapPanelActionText}>{actionLabel}</Text></Pressable></View>
-      </Animated.View>}
-    </View>
-  );
+    );
 }
 
-function CircleScreen({ circleMembers, circle, onInvite, onCreateCircle, onJoin, onOpenMember }: { circleMembers: Member[]; circle: CircleConfig | null; onInvite: () => void; onCreateCircle: () => void; onJoin: () => void; onOpenMember: (member: Member) => void }) {
-  return (
-    <ScrollView style={styles.contentScreen} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
-      <SectionTitle eyebrow="YOUR CIRCLE" title={circle?.circleName ?? 'Your circle'} />
-      {circle ? <>
-        <View style={styles.circleHero}><View style={styles.circleHeroOrb}><Icon name="people" size={28} color={COLORS.white} /></View><View style={styles.circleHeroCopy}><Text style={styles.circleHeroTitle}>Your private circle</Text><Text style={styles.circleHeroBody}>Devices appear here after they share a location.</Text></View>{circle.isOwner && <Pressable style={styles.circleInviteSmall} onPress={onInvite} accessibilityLabel="Invite a circle member"><Icon name="add" size={19} color={COLORS.coral} /></Pressable>}</View>
-        <SectionTitle eyebrow="DEVICES" title={`${circleMembers.length} known device${circleMembers.length === 1 ? '' : 's'}`} />
-        <View style={styles.memberList}>{circleMembers.map((member, index) => <Pressable key={member.id} style={[styles.memberRow, index === circleMembers.length - 1 && styles.memberRowLast]} onPress={() => onOpenMember(member)}><MemberRowAvatar member={member} size={48} /><View style={styles.memberCopy}><View style={styles.memberNameRow}><Text style={styles.memberName}>{member.name}</Text>{member.isYou && <Text style={styles.youLabel}>YOU</Text>}</View><Text style={styles.memberStatus}>{member.status} · {member.lastSeen}</Text></View><View style={styles.memberTrailing}><Icon name="chevron-forward" size={18} color={COLORS.subtle} /></View></Pressable>)}</View>
-        {circle.isOwner && <Pressable style={styles.inviteButton} onPress={onInvite}><Icon name="person-add-outline" size={19} color={COLORS.coral} /><Text style={styles.inviteButtonText}>Invite a circle member</Text><Icon name="arrow-forward" size={17} color={COLORS.coral} /></Pressable>}
-      </> : <>
-        <Text style={styles.emptyNote}>Create a circle for your group or scan an invitation from its owner.</Text>
-        <Pressable style={styles.inviteButton} onPress={onCreateCircle}><Icon name="people-outline" size={19} color={COLORS.coral} /><Text style={styles.inviteButtonText}>Create a circle</Text><Icon name="arrow-forward" size={17} color={COLORS.coral} /></Pressable>
-        <Pressable style={styles.fullWidthAction} onPress={onJoin}><Icon name="qr-code-outline" size={19} color={COLORS.coral} /><Text style={styles.fullWidthActionText}>Join with invitation QR</Text><Icon name="arrow-forward" size={17} color={COLORS.coral} /></Pressable>
-      </>}
-    </ScrollView>
-  );
+function Header({
+    circleName,
+    selfMember,
+    onSettings,
+}: {
+    circleName: string;
+    selfMember: Member;
+    onSettings: () => void;
+}) {
+    return (
+        <View style={styles.header}>
+            <View style={styles.brandMark}>
+                <Icon name="navigate" size={17} color={COLORS.white} />
+            </View>
+            <View style={styles.brandCopy}>
+                <Text style={styles.brandName}>Free360</Text>
+                <Text style={styles.brandSubline}>
+                    {circleName.toUpperCase()}
+                </Text>
+            </View>
+            <Pressable
+                style={styles.headerAvatarButton}
+                onPress={onSettings}
+                hitSlop={8}
+                accessibilityLabel="Open your profile"
+            >
+                <MemberAvatar
+                    name={selfMember.name}
+                    initials={selfMember.initials}
+                    avatar={selfMember.avatar ?? null}
+                    color={selfMember.color}
+                    size={38}
+                />
+            </Pressable>
+        </View>
+    );
 }
 
-function ActivityScreen({ onCheckIn, checkIns, circle }: { onCheckIn: () => void; checkIns: { deviceId: string; payload: CheckIn }[]; circle: CircleConfig | null }) {
-  return (
-    <ScrollView style={styles.contentScreen} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
-      <SectionTitle eyebrow="ENCRYPTED UPDATES" title="Circle activity" />
-      <Text style={styles.emptyNote}>{circle ? 'Check-ins from your circle appear here.' : 'Create or join a circle to see check-ins.'}</Text>
-      {circle && <Text style={styles.timelineLabel}>RECENT CHECK-INS</Text>}
-      {checkIns.length ? <View style={styles.timeline}>{checkIns.map(({ deviceId, payload }, index) => <ActivityItem key={payload.id} icon="checkmark-circle" tone="mint" time={new Date(payload.recordedAt).toLocaleString()} title={deviceId === circle?.deviceId ? 'You checked in' : `Member ${deviceId.slice(0, 6)} checked in`} body={payload.message || 'No note'} isLast={index === checkIns.length - 1} />)}</View> : circle && <Text style={styles.emptyNote}>No check-ins yet.</Text>}
-      {circle && <Pressable style={styles.fullWidthAction} onPress={onCheckIn}><Icon name="checkmark-circle-outline" size={19} color={COLORS.coral} /><Text style={styles.fullWidthActionText}>Send a check-in to your circle</Text><Icon name="arrow-forward" size={17} color={COLORS.coral} /></Pressable>}
-    </ScrollView>
-  );
+function MapScreen({
+    currentCoordinate,
+    locationEnabled,
+    circleName,
+    circleMembers,
+    circleConnected,
+    selfHome,
+    trailMember,
+    trailCoordinates,
+    selfStaySince,
+    selfAddress,
+    nowMs,
+    selectedMember,
+    selectedHistory,
+    onRequestLocation,
+    onCheckIn,
+    onOpenMember,
+    onOpenCircle,
+    onOpenSettings,
+    onInvite,
+    onCreateCircle,
+    onJoinCircle,
+    onHideTrail,
+    onCloseMember,
+    onRefreshMember,
+    onShowTrail,
+    isOwner,
+}: {
+    currentCoordinate: { latitude: number; longitude: number } | null;
+    locationEnabled: boolean;
+    circleName: string;
+    circleMembers: Member[];
+    circleConnected: boolean;
+    selfHome: Home | null;
+    trailMember: Member | null;
+    trailCoordinates: { latitude: number; longitude: number }[];
+    selfStaySince: number | null;
+    selfAddress: string | null;
+    nowMs: number;
+    selectedMember: Member | null;
+    selectedHistory: HistoryPoint[];
+    onRequestLocation: () => void;
+    onCheckIn: () => void;
+    onOpenMember: (member: Member) => void;
+    onOpenCircle: () => void;
+    onOpenSettings: () => void;
+    onInvite: () => void;
+    onCreateCircle: () => void;
+    onJoinCircle: () => void;
+    onHideTrail: () => void;
+    onCloseMember: () => void;
+    onRefreshMember: () => void;
+    onShowTrail: (member: Member) => void;
+    isOwner: boolean;
+}) {
+    const mapRef = useRef<OpenStreetMapHandle>(null);
+    // Derive the empty-state flag purely from already-available values: live device
+    // location (only when sharing), then the first valid shared member location,
+    // then a saved home, else a broad fallback. Never requests location here.
+    // The map view itself is framed by the OpenStreetMap component, which fits
+    // all members on arrival and preserves manual pan/zoom until recentered.
+    const sharedCoordinates = circleMembers
+        .filter((member) => !member.isPaused)
+        .map((member) =>
+            member.isYou ? currentCoordinate : member.coordinate,
+        );
+    const homeCoordinate =
+        circleMembers.find(
+            (member) => member.home && isValidCoordinate(member.home),
+        )?.home ?? (isValidCoordinate(selfHome) ? selfHome : null);
+    const resolved = resolveMapCenter({
+        currentCoordinate,
+        locationEnabled,
+        sharedCoordinates,
+        home: homeCoordinate,
+    });
+    const hasRealLocation = resolved.source !== "fallback";
+
+    const recenter = () => {
+        mapRef.current?.fitGroup();
+    };
+
+    const actionLabel = !circleName
+        ? "Create circle"
+        : isOwner
+          ? "Invite someone"
+          : locationEnabled
+            ? "Your circle"
+            : "Share location";
+    const actionIcon: IconName = !circleName
+        ? "add"
+        : isOwner
+          ? "person-add-outline"
+          : locationEnabled
+            ? "people-outline"
+            : "location-outline";
+    const action = !circleName
+        ? onCreateCircle
+        : isOwner
+          ? onInvite
+          : locationEnabled
+            ? onOpenCircle
+            : onRequestLocation;
+    const validTrail = trailCoordinates.filter(isValidCoordinate);
+    // Top inset is applied manually to the floating overlays below: the root
+    // SafeAreaView skips the top edge on the map tab so tiles render behind the
+    // status bar instead of leaving a solid bar above the map.
+    const topInset = useSafeAreaInsets().top;
+    const narrowScreen = useWindowDimensions().width < 360;
+    const mapMembers: MapMember[] = circleMembers
+        .filter((member) => !member.isPaused)
+        .flatMap((member) => {
+            const coordinate = member.isYou
+                ? currentCoordinate
+                : member.coordinate;
+            if (!isValidCoordinate(coordinate)) return [];
+            const movement = movementDisplay(member);
+            const activity =
+                { pause: "⏸", walk: "🚶", bicycle: "🚲", car: "🚗" }[
+                    movement.icon as string
+                ] ?? "?";
+            // Stationary members show no pause icon or km/h bubble; the empty string
+            // tells the map document to omit the badge while avatar/name/status stay.
+            const staySince = member.isYou ? selfStaySince : member.staySinceMs;
+            const stayDuration = member.isStale
+                ? null
+                : stayDurationLabel(staySince, nowMs);
+            const badge =
+                stayDuration ||
+                isStationaryMovement(member.movement) ||
+                member.movement?.speed == null
+                    ? ""
+                    : `${activity} ${movement.estimated ? "~" : ""}${movement.speed}`;
+            return [
+                {
+                    id: member.id,
+                    coordinate,
+                    name: member.name,
+                    initials: member.initials,
+                    avatar: member.avatar ?? null,
+                    color: member.color,
+                    stale: !!member.isStale,
+                    battery: member.battery,
+                    movement: badge,
+                    stayDuration,
+                    description: stayDuration
+                        ? `Here for ${stayDuration}`
+                        : `${movement.label} · ${movement.speed}`,
+                },
+            ];
+        });
+
+    const [containerHeight, setContainerHeight] = useState(0);
+    const [filter, setFilter] = useState<MapFilter>("people");
+    const sheetSnaps = resolveCircleSheetHeights(containerHeight, topInset);
+    const memberPanel = useDraggableSheet(sheetSnaps);
+    const compactSheet = sheetSnaps.collapsed < 300;
+    const controlsBottom = useMemo(
+        () => Animated.add(memberPanel.height, 16),
+        [memberPanel.height],
+    );
+
+    return (
+        <View
+            style={styles.mapScreen}
+            onLayout={({ nativeEvent }) => {
+                const next = nativeEvent.layout.height;
+                setContainerHeight((prev) =>
+                    Math.abs(prev - next) > 1 ? next : prev,
+                );
+            }}
+        >
+            <OpenStreetMap
+                ref={mapRef}
+                data={{
+                    members: mapMembers,
+                    homes: circleMembers
+                        .filter((member) => isValidCoordinate(member.home))
+                        .map((member) => ({
+                            coordinate: member.home!,
+                            name: member.name,
+                        })),
+                    trail: validTrail,
+                    trailColor: trailMember?.color ?? COLORS.purple,
+                    bottomInset: selectedMember
+                        ? containerHeight * 0.52
+                        : memberPanel.settledHeight,
+                    topInset: topInset + 72,
+                    highlightedMemberId:
+                        selectedMember?.id ??
+                        circleMembers.find(
+                            (member) => member.isYou && !member.isPaused,
+                        )?.id,
+                }}
+                onOpenMember={(id) => {
+                    const member = circleMembers.find(
+                        (member) => member.id === id,
+                    );
+                    if (member) onOpenMember(member);
+                }}
+            />
+            {!hasRealLocation && (
+                <View
+                    style={[styles.mapEmptyOverlay, { top: 132 + topInset }]}
+                    pointerEvents="none"
+                >
+                    <Icon
+                        name={
+                            circleName ? "location-outline" : "people-outline"
+                        }
+                        size={16}
+                        color={COLORS.deepPurple}
+                    />
+                    <Text style={styles.mapEmptyOverlayText}>
+                        {circleName
+                            ? "No shared locations yet — map stays visible"
+                            : "Start a private circle to see locations"}
+                    </Text>
+                </View>
+            )}
+
+            {selectedMember ? (
+                <View
+                    style={[styles.mapMemberHeader, { top: 12 + topInset }]}
+                    accessible
+                    accessibilityLabel={`${selectedMember.name}, ${memberHeaderSubtitle(selectedMember.lastSeen)}`}
+                >
+                    <Pressable
+                        style={styles.mapMemberBack}
+                        hitSlop={8}
+                        onPress={onCloseMember}
+                        accessibilityLabel="Back"
+                    >
+                        <Icon
+                            name="chevron-back"
+                            size={24}
+                            color={COLORS.deepPurple}
+                        />
+                    </Pressable>
+                    <View style={styles.mapMemberHeaderCopy}>
+                        <Text
+                            style={styles.mapMemberHeaderName}
+                            numberOfLines={1}
+                        >
+                            {selectedMember.name}
+                        </Text>
+                        <Text
+                            style={styles.mapMemberHeaderSubtitle}
+                            numberOfLines={1}
+                        >
+                            {memberHeaderSubtitle(selectedMember.lastSeen)}
+                        </Text>
+                    </View>
+                    <Pressable
+                        style={styles.mapMemberRefresh}
+                        hitSlop={8}
+                        onPress={onRefreshMember}
+                        accessibilityLabel="Refresh location"
+                    >
+                        <Icon name="refresh" size={20} color={COLORS.white} />
+                    </Pressable>
+                </View>
+            ) : (
+                <View style={[styles.mapTopBar, { top: 12 + topInset }]}>
+                    <Pressable
+                        style={styles.mapRoundButton}
+                        hitSlop={8}
+                        onPress={onOpenSettings}
+                        accessibilityRole="button"
+                        accessibilityLabel="Open settings"
+                    >
+                        <Icon
+                            name="settings-sharp"
+                            size={22}
+                            color={COLORS.purple}
+                        />
+                    </Pressable>
+                    <Pressable
+                        style={styles.mapCirclePicker}
+                        hitSlop={5}
+                        onPress={onOpenCircle}
+                        accessibilityRole="button"
+                        accessibilityLabel="Open circle"
+                    >
+                        <Text
+                            style={[
+                                styles.mapCirclePickerText,
+                                narrowScreen && { fontSize: 13 },
+                            ]}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.75}
+                        >
+                            {circleName || "Your circle"}
+                        </Text>
+                        <Icon
+                            name="caret-down"
+                            size={12}
+                            color={COLORS.purple}
+                        />
+                    </Pressable>
+                    <View style={styles.mapTopSpacer} />
+                </View>
+            )}
+
+            <View style={[styles.mapTopOverlay, { top: 73 + topInset }]}>
+                {circleName && !circleConnected ? (
+                    <View style={styles.safePill}>
+                        <View
+                            style={[
+                                styles.safeIcon,
+                                { backgroundColor: COLORS.yellowSoft },
+                            ]}
+                        >
+                            <Icon
+                                name="cloud-offline-outline"
+                                size={16}
+                                color={COLORS.yellow}
+                            />
+                        </View>
+                        <View>
+                            <Text style={styles.safePillLabel}>
+                                CIRCLE OFFLINE
+                            </Text>
+                            <Text style={styles.safePillValue}>
+                                Updates may be delayed
+                            </Text>
+                        </View>
+                    </View>
+                ) : null}
+                {!locationEnabled && (
+                    <Pressable
+                        style={styles.locationPrompt}
+                        onPress={onRequestLocation}
+                    >
+                        <Icon
+                            name="location-outline"
+                            size={17}
+                            color={COLORS.purple}
+                        />
+                        <Text style={styles.locationPromptText}>
+                            Turn on location sharing
+                        </Text>
+                        <Icon
+                            name="arrow-forward"
+                            size={16}
+                            color={COLORS.purple}
+                        />
+                    </Pressable>
+                )}
+                {trailMember && (
+                    <Pressable
+                        style={styles.trailPill}
+                        onPress={onHideTrail}
+                        accessibilityLabel="Hide 24-hour trail"
+                    >
+                        <Icon name="footsteps" size={15} color={COLORS.white} />
+                        <Text style={styles.trailPillText} numberOfLines={1}>
+                            {trailMember.name} · 24-hour trail
+                        </Text>
+                        <Icon name="close" size={14} color={COLORS.white} />
+                    </Pressable>
+                )}
+            </View>
+
+            {!selectedMember ? (
+                <Animated.View
+                    style={[styles.mapControls, { bottom: controlsBottom }]}
+                >
+                    <Pressable
+                        style={styles.mapControlButton}
+                        onPress={recenter}
+                        accessibilityRole="button"
+                        accessibilityLabel="Center map on a shared location"
+                        hitSlop={6}
+                    >
+                        <Icon name="locate" size={24} color={COLORS.purple} />
+                    </Pressable>
+                </Animated.View>
+            ) : null}
+
+            {selectedMember ? (
+                <MapMemberSheet
+                    key={selectedMember.id}
+                    member={selectedMember}
+                    history={selectedHistory}
+                    onShowTrail={onShowTrail}
+                    containerHeight={containerHeight}
+                    topInset={topInset}
+                />
+            ) : (
+                <Animated.View
+                    style={[
+                        styles.mapBottomCard,
+                        { height: memberPanel.height },
+                    ]}
+                >
+                    <View
+                        style={styles.cardHandleHit}
+                        {...memberPanel.panHandlers}
+                    >
+                        <Pressable
+                            style={styles.cardHandleButton}
+                            onPress={memberPanel.toggle}
+                            disabled={!memberPanel.canExpand}
+                            accessibilityRole="button"
+                            accessibilityLabel={
+                                memberPanel.isExpanded
+                                    ? "Collapse member list"
+                                    : "Expand member list"
+                            }
+                            accessibilityHint="Drag up to show more members, or drag down to collapse. You can also double tap to toggle."
+                            accessibilityState={{
+                                expanded: memberPanel.isExpanded,
+                                disabled: !memberPanel.canExpand,
+                            }}
+                            accessibilityActions={[
+                                { name: "expand", label: "Show more members" },
+                                {
+                                    name: "collapse",
+                                    label: "Collapse member list",
+                                },
+                            ]}
+                            onAccessibilityAction={({ nativeEvent }) => {
+                                if (nativeEvent.actionName === "expand")
+                                    memberPanel.snapTo(true);
+                                else if (nativeEvent.actionName === "collapse")
+                                    memberPanel.snapTo(false);
+                            }}
+                        >
+                            <View style={styles.cardHandle} />
+                        </Pressable>
+                    </View>
+                    <Text style={styles.mapBottomTitle} numberOfLines={1}>
+                        {circleName || "Your circle"}
+                    </Text>
+                    <MapFilterBar
+                        value={filter}
+                        onChange={setFilter}
+                        compact={compactSheet}
+                    />
+                    {circleName ? (
+                        <ScrollView
+                            style={styles.mapMemberScroll}
+                            contentContainerStyle={styles.mapMemberList}
+                            showsVerticalScrollIndicator={false}
+                            nestedScrollEnabled
+                        >
+                            {filter === "people" ? (
+                                circleMembers.map((member) => {
+                                    // Self rows show their current place and stay time on separate lines;
+                                    // other members keep their own status and last-seen labels.
+                                    const selfLine = member.isYou
+                                        ? selfStatusLine({
+                                              locationEnabled,
+                                              coordinate: isValidCoordinate(
+                                                  currentCoordinate,
+                                              )
+                                                  ? currentCoordinate
+                                                  : null,
+                                              activity:
+                                                  member.movement?.activity ??
+                                                  null,
+                                              staySinceMs: selfStaySince,
+                                              address: selfAddress,
+                                              nowMs,
+                                          })
+                                        : null;
+                                    const lastSeen = (
+                                        selfLine?.lastSeen ??
+                                        (member.staySinceMs != null &&
+                                        !member.isStale
+                                            ? sinceLabel(
+                                                  member.staySinceMs,
+                                                  nowMs,
+                                              )
+                                            : member.lastSeen)
+                                    )
+                                        .replace(/^since /, "Since ")
+                                        .replace(" AM", " a.m.")
+                                        .replace(" PM", " p.m.")
+                                        .replace(/ today$/, "");
+                                    return (
+                                        <Pressable
+                                            key={member.id}
+                                            style={styles.mapMemberRow}
+                                            onPress={() => onOpenMember(member)}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={`View ${member.name}'s location, ${selfLine?.status ?? member.status}, ${lastSeen}`}
+                                        >
+                                            <MemberRowAvatar
+                                                member={member}
+                                                size={60}
+                                            />
+                                            <View style={styles.mapMemberCopy}>
+                                                <Text
+                                                    style={styles.mapMemberName}
+                                                    numberOfLines={1}
+                                                >
+                                                    {member.name}
+                                                </Text>
+                                                <Text
+                                                    style={
+                                                        styles.mapMemberStatus
+                                                    }
+                                                    numberOfLines={2}
+                                                >
+                                                    {selfLine?.status ??
+                                                        member.status}
+                                                </Text>
+                                                <Text
+                                                    style={
+                                                        styles.mapMemberStatus
+                                                    }
+                                                    numberOfLines={1}
+                                                >
+                                                    {lastSeen}
+                                                </Text>
+                                            </View>
+                                        </Pressable>
+                                    );
+                                })
+                            ) : filter === "places" &&
+                              circleMembers.some((member) =>
+                                  isValidCoordinate(member.home),
+                              ) ? (
+                                circleMembers
+                                    .filter((member) =>
+                                        isValidCoordinate(member.home),
+                                    )
+                                    .map((member) => (
+                                        <Pressable
+                                            key={member.id}
+                                            style={styles.mapMemberRow}
+                                            onPress={() => onOpenMember(member)}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={`View ${member.name}'s saved home`}
+                                        >
+                                            <View style={styles.mapPlaceIcon}>
+                                                <Icon
+                                                    name="home"
+                                                    size={30}
+                                                    color={COLORS.purple}
+                                                />
+                                            </View>
+                                            <View style={styles.mapMemberCopy}>
+                                                <Text
+                                                    style={styles.mapMemberName}
+                                                >
+                                                    {member.name}'s home
+                                                </Text>
+                                                <Text
+                                                    style={
+                                                        styles.mapMemberStatus
+                                                    }
+                                                >
+                                                    Saved place
+                                                </Text>
+                                            </View>
+                                        </Pressable>
+                                    ))
+                            ) : (
+                                <View style={styles.mapFilterEmpty}>
+                                    <Icon
+                                        name={
+                                            filter === "pets"
+                                                ? "paw"
+                                                : filter === "items"
+                                                  ? "key"
+                                                  : "business"
+                                        }
+                                        size={30}
+                                        color={COLORS.subtle}
+                                    />
+                                    <Text style={styles.mapEmptyTitle}>
+                                        {filter === "pets"
+                                            ? "No pets to show"
+                                            : filter === "items"
+                                              ? "No items to show"
+                                              : "No saved places yet"}
+                                    </Text>
+                                    <Text style={styles.mapEmptyText}>
+                                        {filter === "places"
+                                            ? "Set your home in your profile to see it here."
+                                            : "This circle currently shares people’s locations."}
+                                    </Text>
+                                    {filter === "places" ? (
+                                        <Pressable
+                                            onPress={onOpenSettings}
+                                            accessibilityRole="button"
+                                            style={styles.mapEmptySettings}
+                                        >
+                                            <Text style={styles.actionText}>
+                                                Set your home
+                                            </Text>
+                                        </Pressable>
+                                    ) : null}
+                                </View>
+                            )}
+                        </ScrollView>
+                    ) : (
+                        <Pressable
+                            style={styles.mapEmptyCard}
+                            onPress={onCreateCircle}
+                            accessibilityRole="button"
+                        >
+                            <Icon
+                                name="people"
+                                size={23}
+                                color={COLORS.purple}
+                            />
+                            <View style={styles.mapEmptyCopy}>
+                                <Text style={styles.mapEmptyTitle}>
+                                    Start a private circle
+                                </Text>
+                                <Text style={styles.mapEmptyText}>
+                                    Create one to see members on the map.
+                                </Text>
+                            </View>
+                            <Icon
+                                name="arrow-forward"
+                                size={18}
+                                color={COLORS.purple}
+                            />
+                        </Pressable>
+                    )}
+                    <View style={styles.mapPanelActions}>
+                        <Pressable
+                            style={styles.mapPanelAction}
+                            accessibilityRole="button"
+                            onPress={circleName ? onCheckIn : onJoinCircle}
+                        >
+                            <Icon
+                                name={circleName ? "location" : "qr-code"}
+                                size={16}
+                                color={COLORS.purple}
+                            />
+                            <Text style={styles.mapPanelActionText}>
+                                {circleName ? "Check in" : "Join with QR"}
+                            </Text>
+                        </Pressable>
+                        <Pressable
+                            style={styles.mapPanelAction}
+                            accessibilityRole="button"
+                            onPress={action}
+                        >
+                            <Icon
+                                name={actionIcon}
+                                size={16}
+                                color={COLORS.purple}
+                            />
+                            <Text style={styles.mapPanelActionText}>
+                                {actionLabel}
+                            </Text>
+                        </Pressable>
+                    </View>
+                </Animated.View>
+            )}
+        </View>
+    );
 }
 
-function ActivityItem({ icon, tone, time, title, body, isLast = false }: { icon: IconName; tone: 'blue' | 'coral' | 'mint' | 'yellow'; time: string; title: string; body: string; isLast?: boolean }) {
-  const palette = { blue: COLORS.blue, coral: COLORS.coral, mint: COLORS.mint, yellow: COLORS.yellow }[tone];
-  const iconName = `${icon}-outline` as IconName;
-  return <View style={styles.timelineItem}><View style={styles.timelineRail}><View style={[styles.timelineIcon, { backgroundColor: tone === 'blue' ? COLORS.blueSoft : tone === 'coral' ? COLORS.coralSoft : tone === 'mint' ? COLORS.mintSoft : COLORS.yellowSoft }]}><Icon name={iconName} size={17} color={palette} /></View>{!isLast && <View style={styles.timelineLine} />}</View><View style={styles.timelineCopy}><Text style={styles.timelineTime}>{time}</Text><Text style={styles.timelineTitle}>{title}</Text><Text style={styles.timelineBody}>{body}</Text></View></View>;
+function CircleScreen({
+    circleMembers,
+    circle,
+    onInvite,
+    onCreateCircle,
+    onJoin,
+    onOpenMember,
+}: {
+    circleMembers: Member[];
+    circle: CircleConfig | null;
+    onInvite: () => void;
+    onCreateCircle: () => void;
+    onJoin: () => void;
+    onOpenMember: (member: Member) => void;
+}) {
+    return (
+        <ScrollView
+            style={styles.contentScreen}
+            contentContainerStyle={styles.contentContainer}
+            showsVerticalScrollIndicator={false}
+        >
+            <SectionTitle
+                eyebrow="YOUR CIRCLE"
+                title={circle?.circleName ?? "Your circle"}
+            />
+            {circle ? (
+                <>
+                    <View style={styles.circleHero}>
+                        <View style={styles.circleHeroOrb}>
+                            <Icon
+                                name="people"
+                                size={28}
+                                color={COLORS.white}
+                            />
+                        </View>
+                        <View style={styles.circleHeroCopy}>
+                            <Text style={styles.circleHeroTitle}>
+                                Your private circle
+                            </Text>
+                            <Text style={styles.circleHeroBody}>
+                                Devices appear here after they share a location.
+                            </Text>
+                        </View>
+                        {circle.isOwner && (
+                            <Pressable
+                                style={styles.circleInviteSmall}
+                                onPress={onInvite}
+                                accessibilityLabel="Invite a circle member"
+                            >
+                                <Icon
+                                    name="add"
+                                    size={19}
+                                    color={COLORS.coral}
+                                />
+                            </Pressable>
+                        )}
+                    </View>
+                    <SectionTitle
+                        eyebrow="DEVICES"
+                        title={`${circleMembers.length} known device${circleMembers.length === 1 ? "" : "s"}`}
+                    />
+                    <View style={styles.memberList}>
+                        {circleMembers.map((member, index) => (
+                            <Pressable
+                                key={member.id}
+                                style={[
+                                    styles.memberRow,
+                                    index === circleMembers.length - 1 &&
+                                        styles.memberRowLast,
+                                ]}
+                                onPress={() => onOpenMember(member)}
+                            >
+                                <MemberRowAvatar member={member} size={48} />
+                                <View style={styles.memberCopy}>
+                                    <View style={styles.memberNameRow}>
+                                        <Text style={styles.memberName}>
+                                            {member.name}
+                                        </Text>
+                                        {member.isYou && (
+                                            <Text style={styles.youLabel}>
+                                                YOU
+                                            </Text>
+                                        )}
+                                    </View>
+                                    <Text style={styles.memberStatus}>
+                                        {member.status} · {member.lastSeen}
+                                    </Text>
+                                </View>
+                                <View style={styles.memberTrailing}>
+                                    <Icon
+                                        name="chevron-forward"
+                                        size={18}
+                                        color={COLORS.subtle}
+                                    />
+                                </View>
+                            </Pressable>
+                        ))}
+                    </View>
+                    {circle.isOwner && (
+                        <Pressable
+                            style={styles.inviteButton}
+                            onPress={onInvite}
+                        >
+                            <Icon
+                                name="person-add-outline"
+                                size={19}
+                                color={COLORS.coral}
+                            />
+                            <Text style={styles.inviteButtonText}>
+                                Invite a circle member
+                            </Text>
+                            <Icon
+                                name="arrow-forward"
+                                size={17}
+                                color={COLORS.coral}
+                            />
+                        </Pressable>
+                    )}
+                </>
+            ) : (
+                <>
+                    <Text style={styles.emptyNote}>
+                        Create a circle for your group or scan an invitation
+                        from its owner.
+                    </Text>
+                    <Pressable
+                        style={styles.inviteButton}
+                        onPress={onCreateCircle}
+                    >
+                        <Icon
+                            name="people-outline"
+                            size={19}
+                            color={COLORS.coral}
+                        />
+                        <Text style={styles.inviteButtonText}>
+                            Create a circle
+                        </Text>
+                        <Icon
+                            name="arrow-forward"
+                            size={17}
+                            color={COLORS.coral}
+                        />
+                    </Pressable>
+                    <Pressable style={styles.fullWidthAction} onPress={onJoin}>
+                        <Icon
+                            name="qr-code-outline"
+                            size={19}
+                            color={COLORS.coral}
+                        />
+                        <Text style={styles.fullWidthActionText}>
+                            Join with invitation QR
+                        </Text>
+                        <Icon
+                            name="arrow-forward"
+                            size={17}
+                            color={COLORS.coral}
+                        />
+                    </Pressable>
+                </>
+            )}
+        </ScrollView>
+    );
 }
 
-function YouScreen({ name, avatar, locationEnabled, locationReady, backgroundReady, circleConnected, onToggleLocation, circle, onCircleSetup, onInvite, onJoin }: { name: string; avatar?: string | null; locationEnabled: boolean; locationReady: boolean; backgroundReady: boolean; circleConnected: boolean; onToggleLocation: () => void; circle: CircleConfig | null; onCircleSetup: () => void; onInvite: () => void; onJoin: () => void }) {
-  const router = useRouter();
-  return (
-    <ScrollView style={styles.contentScreen} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
-      <SectionTitle eyebrow="YOUR DEVICE" title="You" /><Pressable style={styles.fullWidthAction} onPress={() => router.push("/profile")} accessibilityLabel="Open your profile"><Text style={styles.fullWidthActionText}>Your profile, home and notifications</Text></Pressable>
-      <View style={styles.profileCard}><MemberAvatar name={name} avatar={avatar ?? null} color={COLORS.deepPurple} size={68} badgeText={null} /><View style={styles.profileCopy}><Text style={styles.profileName}>{name}</Text><Text style={styles.profileEmail}>No email or password required</Text><View style={styles.profileStatus}><View style={[styles.profileStatusDot, !locationEnabled && styles.profileStatusInactive]} /><Text style={[styles.profileStatusText, !locationEnabled && styles.profileStatusTextInactive]}>{circle ? locationEnabled ? 'Sharing with your circle' : 'Location sharing paused' : 'No circle configured'}</Text></View></View></View>
-      <SectionTitle eyebrow="LOCATION" title="Sharing controls" />
-      <View style={styles.settingsCard}>
-        <View style={styles.settingRow}><View style={[styles.settingIcon, { backgroundColor: COLORS.coralSoft }]}><Icon name="location" size={19} color={COLORS.coral} /></View><View style={styles.settingCopy}><Text style={styles.settingTitle}>Location sharing</Text><Text style={styles.settingDescription}>{!locationReady ? 'Checking device sharing state…' : locationEnabled ? 'Location updates enabled on this device' : 'Location sharing is paused'}</Text></View><Switch value={locationEnabled} disabled={!locationReady} onValueChange={onToggleLocation} trackColor={{ false: COLORS.border, true: COLORS.purpleSoft }} thumbColor={locationEnabled ? COLORS.coral : COLORS.white} /></View>
-        <View style={styles.settingsDivider} />
-        <View style={styles.settingRow}><View style={[styles.settingIcon, { backgroundColor: COLORS.blueSoft }]}><Icon name="navigate" size={19} color={COLORS.blue} /></View><View style={styles.settingCopy}><Text style={styles.settingTitle}>Background updates</Text><Text style={styles.settingDescription}>{backgroundReady ? 'Registered on this device' : 'Not active · development build required'}</Text></View><View style={[styles.statusCheck, { backgroundColor: backgroundReady ? COLORS.mintSoft : COLORS.yellowSoft }]}><Icon name={backgroundReady ? 'checkmark' : 'information'} size={15} color={backgroundReady ? COLORS.mint : COLORS.yellow} /></View></View>
-      </View>
-      <View style={styles.privacyNote}><Icon name="lock-closed-outline" size={17} color={COLORS.muted} /><Text style={styles.privacyText}>Your location is shared only with members of your circle. You can pause sharing any time.</Text></View>
-      <SectionTitle eyebrow="YOUR GROUP" title="Private circle" action={circle?.isOwner ? 'Invite' : undefined} onAction={onInvite} />
-      <View style={styles.settingsCard}>
-        <Pressable style={styles.settingRow} onPress={onCircleSetup}>
-          <View style={[styles.settingIcon, { backgroundColor: circle ? COLORS.mintSoft : COLORS.coralSoft }]}><Icon name={circle ? 'shield-checkmark-outline' : 'server-outline'} size={19} color={circle ? COLORS.mint : COLORS.coral} /></View>
-          <View style={styles.settingCopy}><Text style={styles.settingTitle}>{circle ? circle.circleName : 'Create a private circle'}</Text><Text style={styles.settingDescription}>{circle ? `${circle.isOwner ? 'Circle owner' : 'Circle member'} · ${circleConnected ? 'connected' : 'offline'}` : 'Connect through your group’s server'}</Text></View><Icon name="chevron-forward" size={18} color={COLORS.subtle} />
-        </Pressable>
-        {!circle && <><View style={styles.settingsDivider} /><Pressable style={styles.settingRow} onPress={onJoin}><View style={[styles.settingIcon, { backgroundColor: COLORS.blueSoft }]}><Icon name="qr-code-outline" size={19} color={COLORS.blue} /></View><View style={styles.settingCopy}><Text style={styles.settingTitle}>Join with invitation QR</Text><Text style={styles.settingDescription}>No email sign-up needed</Text></View><Icon name="chevron-forward" size={18} color={COLORS.subtle} /></Pressable></>}
-      </View>
-    </ScrollView>
-  );
+function ActivityScreen({
+    onCheckIn,
+    checkIns,
+    circle,
+}: {
+    onCheckIn: () => void;
+    checkIns: { deviceId: string; payload: CheckIn }[];
+    circle: CircleConfig | null;
+}) {
+    return (
+        <ScrollView
+            style={styles.contentScreen}
+            contentContainerStyle={styles.contentContainer}
+            showsVerticalScrollIndicator={false}
+        >
+            <SectionTitle eyebrow="ENCRYPTED UPDATES" title="Circle activity" />
+            <Text style={styles.emptyNote}>
+                {circle
+                    ? "Check-ins from your circle appear here."
+                    : "Create or join a circle to see check-ins."}
+            </Text>
+            {circle && (
+                <Text style={styles.timelineLabel}>RECENT CHECK-INS</Text>
+            )}
+            {checkIns.length ? (
+                <View style={styles.timeline}>
+                    {checkIns.map(({ deviceId, payload }, index) => (
+                        <ActivityItem
+                            key={payload.id}
+                            icon="checkmark-circle"
+                            tone="mint"
+                            time={new Date(payload.recordedAt).toLocaleString()}
+                            title={
+                                deviceId === circle?.deviceId
+                                    ? "You checked in"
+                                    : `Member ${deviceId.slice(0, 6)} checked in`
+                            }
+                            body={payload.message || "No note"}
+                            isLast={index === checkIns.length - 1}
+                        />
+                    ))}
+                </View>
+            ) : (
+                circle && (
+                    <Text style={styles.emptyNote}>No check-ins yet.</Text>
+                )
+            )}
+            {circle && (
+                <Pressable style={styles.fullWidthAction} onPress={onCheckIn}>
+                    <Icon
+                        name="checkmark-circle-outline"
+                        size={19}
+                        color={COLORS.coral}
+                    />
+                    <Text style={styles.fullWidthActionText}>
+                        Send a check-in to your circle
+                    </Text>
+                    <Icon name="arrow-forward" size={17} color={COLORS.coral} />
+                </Pressable>
+            )}
+        </ScrollView>
+    );
 }
 
-function BottomTabs({ activeTab, onTabChange }: { activeTab: Tab; onTabChange: (tab: Tab) => void }) {
-  const tabs: { key: Tab; label: string; icon: IconName; activeIcon: IconName }[] = [{ key: 'map', label: 'Location', icon: 'location-outline', activeIcon: 'location' }, { key: 'circle', label: 'Circle', icon: 'people-outline', activeIcon: 'people' }, { key: 'activity', label: 'Activity', icon: 'pulse-outline', activeIcon: 'pulse' }, { key: 'you', label: 'You', icon: 'person-outline', activeIcon: 'person' }];
-  return <View style={styles.bottomTabs}>{tabs.map((tab) => { const isActive = tab.key === activeTab; return <Pressable key={tab.key} style={styles.tabButton} onPress={() => onTabChange(tab.key)}><View style={[styles.tabIconWrap, isActive && styles.tabIconWrapActive]}><Icon name={isActive ? tab.activeIcon : tab.icon} size={22} color={isActive ? COLORS.purple : COLORS.muted} /></View><Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>{tab.label}</Text></Pressable>; })}</View>;
+function ActivityItem({
+    icon,
+    tone,
+    time,
+    title,
+    body,
+    isLast = false,
+}: {
+    icon: IconName;
+    tone: "blue" | "coral" | "mint" | "yellow";
+    time: string;
+    title: string;
+    body: string;
+    isLast?: boolean;
+}) {
+    const palette = {
+        blue: COLORS.blue,
+        coral: COLORS.coral,
+        mint: COLORS.mint,
+        yellow: COLORS.yellow,
+    }[tone];
+    const iconName = `${icon}-outline` as IconName;
+    return (
+        <View style={styles.timelineItem}>
+            <View style={styles.timelineRail}>
+                <View
+                    style={[
+                        styles.timelineIcon,
+                        {
+                            backgroundColor:
+                                tone === "blue"
+                                    ? COLORS.blueSoft
+                                    : tone === "coral"
+                                      ? COLORS.coralSoft
+                                      : tone === "mint"
+                                        ? COLORS.mintSoft
+                                        : COLORS.yellowSoft,
+                        },
+                    ]}
+                >
+                    <Icon name={iconName} size={17} color={palette} />
+                </View>
+                {!isLast && <View style={styles.timelineLine} />}
+            </View>
+            <View style={styles.timelineCopy}>
+                <Text style={styles.timelineTime}>{time}</Text>
+                <Text style={styles.timelineTitle}>{title}</Text>
+                <Text style={styles.timelineBody}>{body}</Text>
+            </View>
+        </View>
+    );
 }
 
-function CheckInModal({ visible, onClose, onConfirm }: { visible: boolean; onClose: () => void; onConfirm: (message: string) => void }) {
-  const [message, setMessage] = useState('');
-  return <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}><KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}><Pressable style={styles.modalDismissArea} onPress={onClose} /><View style={styles.checkInSheet}><View style={styles.sheetHandle} /><View style={styles.sheetIcon}><Icon name="checkmark-circle" size={32} color={COLORS.mint} /></View><Text style={styles.sheetTitle}>Check in with your circle</Text><Text style={styles.sheetBody}>Send an encrypted check-in. Add a note if you want to.</Text><TextInput value={message} onChangeText={setMessage} style={styles.messageInput} placeholder="Optional note" placeholderTextColor={COLORS.subtle} multiline /><Pressable style={styles.confirmCheckIn} onPress={() => onConfirm(message)}><Text style={styles.confirmCheckInText}>Send check-in</Text><Icon name="arrow-forward" size={18} color={COLORS.white} /></Pressable><Pressable style={styles.cancelButton} onPress={onClose}><Text style={styles.cancelButtonText}>Not now</Text></Pressable></View></KeyboardAvoidingView></Modal>;
+function YouScreen({
+    name,
+    avatar,
+    locationEnabled,
+    locationReady,
+    backgroundReady,
+    circleConnected,
+    onToggleLocation,
+    circle,
+    onCircleSetup,
+    onInvite,
+    onJoin,
+}: {
+    name: string;
+    avatar?: string | null;
+    locationEnabled: boolean;
+    locationReady: boolean;
+    backgroundReady: boolean;
+    circleConnected: boolean;
+    onToggleLocation: () => void;
+    circle: CircleConfig | null;
+    onCircleSetup: () => void;
+    onInvite: () => void;
+    onJoin: () => void;
+}) {
+    const router = useRouter();
+    return (
+        <ScrollView
+            style={styles.contentScreen}
+            contentContainerStyle={styles.contentContainer}
+            showsVerticalScrollIndicator={false}
+        >
+            <SectionTitle eyebrow="YOUR DEVICE" title="You" />
+            <Pressable
+                style={styles.fullWidthAction}
+                onPress={() => router.push("/profile")}
+                accessibilityLabel="Open your profile"
+            >
+                <Text style={styles.fullWidthActionText}>
+                    Your profile, home and notifications
+                </Text>
+            </Pressable>
+            <View style={styles.profileCard}>
+                <MemberAvatar
+                    name={name}
+                    avatar={avatar ?? null}
+                    color={COLORS.deepPurple}
+                    size={68}
+                    badgeText={null}
+                />
+                <View style={styles.profileCopy}>
+                    <Text style={styles.profileName}>{name}</Text>
+                    <Text style={styles.profileEmail}>
+                        No email or password required
+                    </Text>
+                    <View style={styles.profileStatus}>
+                        <View
+                            style={[
+                                styles.profileStatusDot,
+                                !locationEnabled &&
+                                    styles.profileStatusInactive,
+                            ]}
+                        />
+                        <Text
+                            style={[
+                                styles.profileStatusText,
+                                !locationEnabled &&
+                                    styles.profileStatusTextInactive,
+                            ]}
+                        >
+                            {circle
+                                ? locationEnabled
+                                    ? "Sharing with your circle"
+                                    : "Location sharing paused"
+                                : "No circle configured"}
+                        </Text>
+                    </View>
+                </View>
+            </View>
+            <SectionTitle eyebrow="LOCATION" title="Sharing controls" />
+            <View style={styles.settingsCard}>
+                <View style={styles.settingRow}>
+                    <View
+                        style={[
+                            styles.settingIcon,
+                            { backgroundColor: COLORS.coralSoft },
+                        ]}
+                    >
+                        <Icon name="location" size={19} color={COLORS.coral} />
+                    </View>
+                    <View style={styles.settingCopy}>
+                        <Text style={styles.settingTitle}>
+                            Location sharing
+                        </Text>
+                        <Text style={styles.settingDescription}>
+                            {!locationReady
+                                ? "Checking device sharing state…"
+                                : locationEnabled
+                                  ? "Location updates enabled on this device"
+                                  : "Location sharing is paused"}
+                        </Text>
+                    </View>
+                    <Switch
+                        value={locationEnabled}
+                        disabled={!locationReady}
+                        onValueChange={onToggleLocation}
+                        trackColor={{
+                            false: COLORS.border,
+                            true: COLORS.purpleSoft,
+                        }}
+                        thumbColor={
+                            locationEnabled ? COLORS.coral : COLORS.white
+                        }
+                    />
+                </View>
+                <View style={styles.settingsDivider} />
+                <View style={styles.settingRow}>
+                    <View
+                        style={[
+                            styles.settingIcon,
+                            { backgroundColor: COLORS.blueSoft },
+                        ]}
+                    >
+                        <Icon name="navigate" size={19} color={COLORS.blue} />
+                    </View>
+                    <View style={styles.settingCopy}>
+                        <Text style={styles.settingTitle}>
+                            Background updates
+                        </Text>
+                        <Text style={styles.settingDescription}>
+                            {backgroundReady
+                                ? "Registered on this device"
+                                : "Not active · development build required"}
+                        </Text>
+                    </View>
+                    <View
+                        style={[
+                            styles.statusCheck,
+                            {
+                                backgroundColor: backgroundReady
+                                    ? COLORS.mintSoft
+                                    : COLORS.yellowSoft,
+                            },
+                        ]}
+                    >
+                        <Icon
+                            name={backgroundReady ? "checkmark" : "information"}
+                            size={15}
+                            color={
+                                backgroundReady ? COLORS.mint : COLORS.yellow
+                            }
+                        />
+                    </View>
+                </View>
+            </View>
+            <View style={styles.privacyNote}>
+                <Icon
+                    name="lock-closed-outline"
+                    size={17}
+                    color={COLORS.muted}
+                />
+                <Text style={styles.privacyText}>
+                    Your location is shared only with members of your circle.
+                    You can pause sharing any time.
+                </Text>
+            </View>
+            <SectionTitle
+                eyebrow="YOUR GROUP"
+                title="Private circle"
+                action={circle?.isOwner ? "Invite" : undefined}
+                onAction={onInvite}
+            />
+            <View style={styles.settingsCard}>
+                <Pressable style={styles.settingRow} onPress={onCircleSetup}>
+                    <View
+                        style={[
+                            styles.settingIcon,
+                            {
+                                backgroundColor: circle
+                                    ? COLORS.mintSoft
+                                    : COLORS.coralSoft,
+                            },
+                        ]}
+                    >
+                        <Icon
+                            name={
+                                circle
+                                    ? "shield-checkmark-outline"
+                                    : "server-outline"
+                            }
+                            size={19}
+                            color={circle ? COLORS.mint : COLORS.coral}
+                        />
+                    </View>
+                    <View style={styles.settingCopy}>
+                        <Text style={styles.settingTitle}>
+                            {circle
+                                ? circle.circleName
+                                : "Create a private circle"}
+                        </Text>
+                        <Text style={styles.settingDescription}>
+                            {circle
+                                ? `${circle.isOwner ? "Circle owner" : "Circle member"} · ${circleConnected ? "connected" : "offline"}`
+                                : "Connect through your group’s server"}
+                        </Text>
+                    </View>
+                    <Icon
+                        name="chevron-forward"
+                        size={18}
+                        color={COLORS.subtle}
+                    />
+                </Pressable>
+                {!circle && (
+                    <>
+                        <View style={styles.settingsDivider} />
+                        <Pressable style={styles.settingRow} onPress={onJoin}>
+                            <View
+                                style={[
+                                    styles.settingIcon,
+                                    { backgroundColor: COLORS.blueSoft },
+                                ]}
+                            >
+                                <Icon
+                                    name="qr-code-outline"
+                                    size={19}
+                                    color={COLORS.blue}
+                                />
+                            </View>
+                            <View style={styles.settingCopy}>
+                                <Text style={styles.settingTitle}>
+                                    Join with invitation QR
+                                </Text>
+                                <Text style={styles.settingDescription}>
+                                    No email sign-up needed
+                                </Text>
+                            </View>
+                            <Icon
+                                name="chevron-forward"
+                                size={18}
+                                color={COLORS.subtle}
+                            />
+                        </Pressable>
+                    </>
+                )}
+            </View>
+        </ScrollView>
+    );
 }
 
-function MemberSheetBody({ member, history, onShowTrail, avatarScale }: { member: Member; history: HistoryPoint[]; onShowTrail: (member: Member) => void; avatarScale?: Animated.AnimatedInterpolation<number> }) {
-  // Shared sheet body (map + non-map modal): reuses existing member fields
-  // (name, status, lastSeen, battery, isPaused/isStale, historyCount,
-  // movement) plus already-loaded `history` points. No new fetching, state,
-  // navigation, or invented actions/data. Drag state lives in MapMemberSheet
-  // (map tab only); the modal path below keeps its static handle.
-  const sharing = !member.isPaused && !member.isStale;
-  const avatar = <View style={styles.memberAvatarOverlap}><View style={styles.memberAvatarRing}><MemberAvatar name={member.name} initials={member.initials} avatar={member.avatar ?? null} color={member.color} size={88} /></View></View>;
-  return <>{avatarScale ? <Animated.View style={{ transform: [{ scale: avatarScale }] }}>{avatar}</Animated.View> : avatar}<ScrollView style={styles.memberSheetScroll} contentContainerStyle={styles.memberSheetScrollContent} showsVerticalScrollIndicator={false}><View style={styles.memberSheetHeader}><View style={styles.memberDetailNameRow}><Text style={styles.memberSheetName} numberOfLines={2}>{member.name}</Text><View style={[styles.memberOnlineDot, !sharing && styles.memberOnlineDotOff]} accessibilityLabel={sharing ? 'Sharing' : 'Not sharing'} /></View><BatteryBadge value={member.battery} /></View><Text style={styles.memberStreetTime} numberOfLines={2}>{member.status} · {member.lastSeen}</Text><View style={styles.memberDetailGrid}><DetailStat icon="location" label="Sharing" value={member.status} /><DetailStat icon="time-outline" label="Last update" value={member.lastSeen} />{!isStationaryMovement(member.movement) && <DetailStat icon={movementDisplay(member).icon} label={movementDisplay(member).label} value={movementDisplay(member).speed} />}<DetailStat icon="footsteps" label="Past 24h" value={member.historyCount ? `${member.historyCount} trail points` : 'No trail yet'} /></View><MemberHistoryTimeline history={history} /></ScrollView>{member.historyCount > 0 && <View style={styles.memberStickyFade}><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.memberStickyRow}><Pressable style={styles.memberTrailPill} onPress={() => onShowTrail(member)}><Icon name="footsteps" size={18} color={COLORS.deepPurple} /><Text style={styles.memberTrailPillText}>Show 24-hour trail on map</Text><Icon name="arrow-forward" size={17} color={COLORS.deepPurple} /></Pressable></ScrollView></View>}</>;
+function BottomTabs({
+    activeTab,
+    onTabChange,
+}: {
+    activeTab: Tab;
+    onTabChange: (tab: Tab) => void;
+}) {
+    const tabs: {
+        key: Tab;
+        label: string;
+        icon: IconName;
+        activeIcon: IconName;
+    }[] = [
+        {
+            key: "map",
+            label: "Location",
+            icon: "location-outline",
+            activeIcon: "location",
+        },
+        {
+            key: "circle",
+            label: "Circle",
+            icon: "people-outline",
+            activeIcon: "people",
+        },
+        {
+            key: "activity",
+            label: "Activity",
+            icon: "pulse-outline",
+            activeIcon: "pulse",
+        },
+        {
+            key: "you",
+            label: "You",
+            icon: "person-outline",
+            activeIcon: "person",
+        },
+    ];
+    return (
+        <View style={styles.bottomTabs}>
+            {tabs.map((tab) => {
+                const isActive = tab.key === activeTab;
+                return (
+                    <Pressable
+                        key={tab.key}
+                        style={styles.tabButton}
+                        onPress={() => onTabChange(tab.key)}
+                    >
+                        <View
+                            style={[
+                                styles.tabIconWrap,
+                                isActive && styles.tabIconWrapActive,
+                            ]}
+                        >
+                            <Icon
+                                name={isActive ? tab.activeIcon : tab.icon}
+                                size={22}
+                                color={isActive ? COLORS.purple : COLORS.muted}
+                            />
+                        </View>
+                        <Text
+                            style={[
+                                styles.tabLabel,
+                                isActive && styles.tabLabelActive,
+                            ]}
+                        >
+                            {tab.label}
+                        </Text>
+                    </Pressable>
+                );
+            })}
+        </View>
+    );
 }
 
-function MemberSheetContent({ member, history, onShowTrail, sheetStyle }: { member: Member; history: HistoryPoint[]; onShowTrail: (member: Member) => void; sheetStyle?: object }) {
-  // Non-map modal path: static sheet (visual handle only, existing scroll +
-  // trail press). No back button here: the caller owns close semantics.
-  return <View style={sheetStyle ?? styles.memberSheet}><View style={styles.memberSheetHandle} accessible={false} /><MemberSheetBody member={member} history={history} onShowTrail={onShowTrail} /></View>;
+function CheckInModal({
+    visible,
+    onClose,
+    onConfirm,
+}: {
+    visible: boolean;
+    onClose: () => void;
+    onConfirm: (message: string) => void;
+}) {
+    const [message, setMessage] = useState("");
+    return (
+        <Modal
+            visible={visible}
+            transparent
+            animationType="slide"
+            onRequestClose={onClose}
+        >
+            <KeyboardAvoidingView
+                style={styles.modalBackdrop}
+                behavior={Platform.OS === "ios" ? "padding" : undefined}
+            >
+                <Pressable style={styles.modalDismissArea} onPress={onClose} />
+                <View style={styles.checkInSheet}>
+                    <View style={styles.sheetHandle} />
+                    <View style={styles.sheetIcon}>
+                        <Icon
+                            name="checkmark-circle"
+                            size={32}
+                            color={COLORS.mint}
+                        />
+                    </View>
+                    <Text style={styles.sheetTitle}>
+                        Check in with your circle
+                    </Text>
+                    <Text style={styles.sheetBody}>
+                        Send an encrypted check-in. Add a note if you want to.
+                    </Text>
+                    <TextInput
+                        value={message}
+                        onChangeText={setMessage}
+                        style={styles.messageInput}
+                        placeholder="Optional note"
+                        placeholderTextColor={COLORS.subtle}
+                        multiline
+                    />
+                    <Pressable
+                        style={styles.confirmCheckIn}
+                        onPress={() => onConfirm(message)}
+                    >
+                        <Text style={styles.confirmCheckInText}>
+                            Send check-in
+                        </Text>
+                        <Icon
+                            name="arrow-forward"
+                            size={18}
+                            color={COLORS.white}
+                        />
+                    </Pressable>
+                    <Pressable style={styles.cancelButton} onPress={onClose}>
+                        <Text style={styles.cancelButtonText}>Not now</Text>
+                    </Pressable>
+                </View>
+            </KeyboardAvoidingView>
+        </Modal>
+    );
 }
 
-
-function MemberModal({ member, history, onClose, onShowTrail }: { member: Member | null; history: HistoryPoint[]; onClose: () => void; onShowTrail: (member: Member) => void }) {
-  // Non-map tabs only: native Modal is fine here because no map is exposed
-  // behind it. The map tab renders MemberSheetContent in place (see
-  // MapScreen) so pan/drag stay interactive. Backdrop tap keeps existing
-  // close semantics.
-  if (!member) return null;
-  return <Modal visible={Boolean(member)} transparent animationType="slide" onRequestClose={onClose}><View style={styles.modalBackdrop}><Pressable style={styles.modalDismissArea} onPress={onClose} /><MemberSheetContent member={member} history={history} onShowTrail={onShowTrail} /></View></Modal>;
+function MemberSheetBody({
+    member,
+    history,
+    onShowTrail,
+    avatarScale,
+}: {
+    member: Member;
+    history: HistoryPoint[];
+    onShowTrail: (member: Member) => void;
+    avatarScale?: Animated.AnimatedInterpolation<number>;
+}) {
+    // Shared sheet body (map + non-map modal): reuses existing member fields
+    // (name, status, lastSeen, battery, isPaused/isStale, historyCount,
+    // movement) plus already-loaded `history` points. No new fetching, state,
+    // navigation, or invented actions/data. Drag state lives in MapMemberSheet
+    // (map tab only); the modal path below keeps its static handle.
+    const sharing = !member.isPaused && !member.isStale;
+    const avatar = (
+        <View style={styles.memberAvatarOverlap}>
+            <View style={styles.memberAvatarRing}>
+                <MemberAvatar
+                    name={member.name}
+                    initials={member.initials}
+                    avatar={member.avatar ?? null}
+                    color={member.color}
+                    size={88}
+                />
+            </View>
+        </View>
+    );
+    return (
+        <>
+            {avatarScale ? (
+                <Animated.View style={{ transform: [{ scale: avatarScale }] }}>
+                    {avatar}
+                </Animated.View>
+            ) : (
+                avatar
+            )}
+            <ScrollView
+                style={styles.memberSheetScroll}
+                contentContainerStyle={styles.memberSheetScrollContent}
+                showsVerticalScrollIndicator={false}
+            >
+                <View style={styles.memberSheetHeader}>
+                    <View style={styles.memberDetailNameRow}>
+                        <Text style={styles.memberSheetName} numberOfLines={2}>
+                            {member.name}
+                        </Text>
+                        <View
+                            style={[
+                                styles.memberOnlineDot,
+                                !sharing && styles.memberOnlineDotOff,
+                            ]}
+                            accessibilityLabel={
+                                sharing ? "Sharing" : "Not sharing"
+                            }
+                        />
+                    </View>
+                    <BatteryBadge value={member.battery} />
+                </View>
+                <Text style={styles.memberStreetTime} numberOfLines={2}>
+                    {member.status} · {member.lastSeen}
+                </Text>
+                <View style={styles.memberDetailGrid}>
+                    <DetailStat
+                        icon="location"
+                        label="Sharing"
+                        value={member.status}
+                    />
+                    <DetailStat
+                        icon="time-outline"
+                        label="Last update"
+                        value={member.lastSeen}
+                    />
+                    {!isStationaryMovement(member.movement) && (
+                        <DetailStat
+                            icon={movementDisplay(member).icon}
+                            label={movementDisplay(member).label}
+                            value={movementDisplay(member).speed}
+                        />
+                    )}
+                    <DetailStat
+                        icon="footsteps"
+                        label="Past 24h"
+                        value={
+                            member.historyCount
+                                ? `${member.historyCount} trail points`
+                                : "No trail yet"
+                        }
+                    />
+                </View>
+                <MemberHistoryTimeline history={history} />
+            </ScrollView>
+            {member.historyCount > 0 && (
+                <View style={styles.memberStickyFade}>
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.memberStickyRow}
+                    >
+                        <Pressable
+                            style={styles.memberTrailPill}
+                            onPress={() => onShowTrail(member)}
+                        >
+                            <Icon
+                                name="footsteps"
+                                size={18}
+                                color={COLORS.deepPurple}
+                            />
+                            <Text style={styles.memberTrailPillText}>
+                                Show 24-hour trail on map
+                            </Text>
+                            <Icon
+                                name="arrow-forward"
+                                size={17}
+                                color={COLORS.deepPurple}
+                            />
+                        </Pressable>
+                    </ScrollView>
+                </View>
+            )}
+        </>
+    );
 }
 
+function MemberSheetContent({
+    member,
+    history,
+    onShowTrail,
+    sheetStyle,
+}: {
+    member: Member;
+    history: HistoryPoint[];
+    onShowTrail: (member: Member) => void;
+    sheetStyle?: object;
+}) {
+    // Non-map modal path: static sheet (visual handle only, existing scroll +
+    // trail press). No back button here: the caller owns close semantics.
+    return (
+        <View style={sheetStyle ?? styles.memberSheet}>
+            <View style={styles.memberSheetHandle} accessible={false} />
+            <MemberSheetBody
+                member={member}
+                history={history}
+                onShowTrail={onShowTrail}
+            />
+        </View>
+    );
+}
 
-function MapMemberSheet({ member, history, onShowTrail, containerHeight, topInset }: { member: Member; history: HistoryPoint[]; onShowTrail: (member: Member) => void; containerHeight: number; topInset: number }) {
-  // Draggable map sheet: handle-drag up expands, down snaps back to the ~52%
-  // rest height with a smooth Animated.timing snap. Height/radius/margins are
-  // layout props so useNativeDriver stays false (the native driver omits
-  // layout). Gesture capture is handle-only: the timeline ScrollView keeps
-  // its own scrolling and the exposed map stays pannable (no full-screen
-  // touch blocker). Down-drag never dismisses; close stays on the header
-  // back button. Callers remount per member (key={member.id}) so a newly
-  // opened member always rests collapsed.
-  const { collapsed, expanded } = useMemo(() => resolveMemberSheetHeights(containerHeight, topInset), [containerHeight, topInset]);
-  const measured = containerHeight > 0 && collapsed > 0;
-  const canExpand = measured && expanded > collapsed;
-  const [isExpanded, setIsExpanded] = useState(false);
-  // Stable lazy state (not refs): the refs rule forbids reading ref values
-  // during render, and height/panResponder flow into JSX output below.
-  // Mutable gesture bookkeeping stays in refs synced via effects/handlers.
-  const [height] = useState(() => new Animated.Value(0));
-  const currentHeight = useRef(0);
-  const baseline = useRef(0);
-  const expandedRef = useRef(false);
-  const snapsRef = useRef({ collapsed, expanded });
-  const animRef = useRef<Animated.CompositeAnimation | null>(null);
+function MemberModal({
+    member,
+    history,
+    onClose,
+    onShowTrail,
+}: {
+    member: Member | null;
+    history: HistoryPoint[];
+    onClose: () => void;
+    onShowTrail: (member: Member) => void;
+}) {
+    // Non-map tabs only: native Modal is fine here because no map is exposed
+    // behind it. The map tab renders MemberSheetContent in place (see
+    // MapScreen) so pan/drag stay interactive. Backdrop tap keeps existing
+    // close semantics.
+    if (!member) return null;
+    return (
+        <Modal
+            visible={Boolean(member)}
+            transparent
+            animationType="slide"
+            onRequestClose={onClose}
+        >
+            <View style={styles.modalBackdrop}>
+                <Pressable style={styles.modalDismissArea} onPress={onClose} />
+                <MemberSheetContent
+                    member={member}
+                    history={history}
+                    onShowTrail={onShowTrail}
+                />
+            </View>
+        </Modal>
+    );
+}
 
-  // Keep gesture callbacks on fresh snap bounds without touching refs render.
-  useEffect(() => {
-    snapsRef.current = { collapsed, expanded };
-  }, [collapsed, expanded]);
+function MapMemberSheet({
+    member,
+    history,
+    onShowTrail,
+    containerHeight,
+    topInset,
+}: {
+    member: Member;
+    history: HistoryPoint[];
+    onShowTrail: (member: Member) => void;
+    containerHeight: number;
+    topInset: number;
+}) {
+    // Draggable map sheet: handle-drag up expands, down snaps back to the ~52%
+    // rest height with a smooth Animated.timing snap. Height/radius/margins are
+    // layout props so useNativeDriver stays false (the native driver omits
+    // layout). Gesture capture is handle-only: the timeline ScrollView keeps
+    // its own scrolling and the exposed map stays pannable (no full-screen
+    // touch blocker). Down-drag never dismisses; close stays on the header
+    // back button. Callers remount per member (key={member.id}) so a newly
+    // opened member always rests collapsed.
+    const { collapsed, expanded } = useMemo(
+        () => resolveMemberSheetHeights(containerHeight, topInset),
+        [containerHeight, topInset],
+    );
+    const measured = containerHeight > 0 && collapsed > 0;
+    const canExpand = measured && expanded > collapsed;
+    const [isExpanded, setIsExpanded] = useState(false);
+    // Stable lazy state (not refs): the refs rule forbids reading ref values
+    // during render, and height/panResponder flow into JSX output below.
+    // Mutable gesture bookkeeping stays in refs synced via effects/handlers.
+    const [height] = useState(() => new Animated.Value(0));
+    const currentHeight = useRef(0);
+    const baseline = useRef(0);
+    const expandedRef = useRef(false);
+    const snapsRef = useRef({ collapsed, expanded });
+    const animRef = useRef<Animated.CompositeAnimation | null>(null);
 
-  // Adopt measured heights (first layout, rotation): stop any flight and rest
-  // at the current snap so bounds always match the real container.
-  useEffect(() => {
-    if (!measured) return;
-    animRef.current?.stop();
-    animRef.current = null;
-    const target = expandedRef.current && canExpand ? expanded : collapsed;
-    baseline.current = target;
-    currentHeight.current = target;
-    height.setValue(target);
-  }, [collapsed, expanded, measured, canExpand, height]);
-  // Track the live animated value so a mid-flight re-grab uses the true
-  // visual baseline instead of a stale snap (avoids height jumps).
-  useEffect(() => {
-    const id = height.addListener(({ value }) => { currentHeight.current = value; });
-    return () => { height.removeListener(id); };
-  }, [height]);
-  useEffect(() => () => { animRef.current?.stop(); }, []);
+    // Keep gesture callbacks on fresh snap bounds without touching refs render.
+    useEffect(() => {
+        snapsRef.current = { collapsed, expanded };
+    }, [collapsed, expanded]);
 
-  const snapTo = useCallback((expand: boolean) => {
-    const snaps = snapsRef.current;
-    const targetExpanded = expand && snaps.expanded > snaps.collapsed;
-    const target = targetExpanded ? snaps.expanded : snaps.collapsed;
-    expandedRef.current = targetExpanded;
-    setIsExpanded(targetExpanded);
-    baseline.current = target;
-    animRef.current?.stop();
-    const anim = Animated.timing(height, { toValue: target, duration: 240, easing: Easing.out(Easing.cubic), useNativeDriver: false });
-    animRef.current = anim;
-    anim.start(({ finished }) => { if (finished && animRef.current === anim) animRef.current = null; });
-  }, [height]);
+    // Adopt measured heights (first layout, rotation): stop any flight and rest
+    // at the current snap so bounds always match the real container.
+    useEffect(() => {
+        if (!measured) return;
+        animRef.current?.stop();
+        animRef.current = null;
+        const target = expandedRef.current && canExpand ? expanded : collapsed;
+        baseline.current = target;
+        currentHeight.current = target;
+        height.setValue(target);
+    }, [collapsed, expanded, measured, canExpand, height]);
+    // Track the live animated value so a mid-flight re-grab uses the true
+    // visual baseline instead of a stale snap (avoids height jumps).
+    useEffect(() => {
+        const id = height.addListener(({ value }) => {
+            currentHeight.current = value;
+        });
+        return () => {
+            height.removeListener(id);
+        };
+    }, [height]);
+    useEffect(
+        () => () => {
+            animRef.current?.stop();
+        },
+        [],
+    );
 
-  // Created in an effect (not render): a lazy-state initializer counts as
-  // render-time to the refs rule, which would flag the ref reads inside the
-  // deferred gesture callbacks. snapTo/height are stable so this runs once;
-  // handlers stay fresh through effect-synced refs.
-  const [panResponder, setPanResponder] = useState<PanResponderInstance | null>(null);
-  useEffect(() => {
-    setPanResponder(PanResponder.create({
-    // Tap is left to the toggle button (no capture on press down); only a
-    // vertical move beyond slop becomes a sheet drag, so horizontal movement
-    // and taps never hijack touches.
-    onStartShouldSetPanResponder: () => false,
-    onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 6 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
-    onPanResponderGrant: () => {
-      // Interrupt any snap flight; drag continues from the live height.
-      animRef.current?.stop();
-      animRef.current = null;
-      baseline.current = currentHeight.current;
-    },
-    onPanResponderMove: (_, gestureState) => {
-      const snaps = snapsRef.current;
-      height.setValue(clampMemberSheetHeight(baseline.current - gestureState.dy, snaps.collapsed, snaps.expanded));
-    },
-    onPanResponderTerminationRequest: () => true,
-    onPanResponderRelease: (_, gestureState) => {
-      snapTo(nextMemberSheetExpanded({ expanded: expandedRef.current, dragDy: gestureState.dy, velocityY: gestureState.vy }));
-    },
-    // A stolen responder (e.g. system interruption) springs back to the start
-    // snap instead of stranding the sheet mid-drag; never dismisses.
-    onPanResponderTerminate: () => {
-      snapTo(expandedRef.current);
-    },
-    }));
-  }, [height, snapTo]);
+    const snapTo = useCallback(
+        (expand: boolean) => {
+            const snaps = snapsRef.current;
+            const targetExpanded = expand && snaps.expanded > snaps.collapsed;
+            const target = targetExpanded ? snaps.expanded : snaps.collapsed;
+            expandedRef.current = targetExpanded;
+            setIsExpanded(targetExpanded);
+            baseline.current = target;
+            animRef.current?.stop();
+            const anim = Animated.timing(height, {
+                toValue: target,
+                duration: 240,
+                easing: Easing.out(Easing.cubic),
+                useNativeDriver: false,
+            });
+            animRef.current = anim;
+            anim.start(({ finished }) => {
+                if (finished && animRef.current === anim)
+                    animRef.current = null;
+            });
+        },
+        [height],
+    );
 
-  const toggleLabel = isExpanded ? 'Collapse member details' : 'Expand member details';
-  const handleLabel = `Member details, ${isExpanded ? 'expanded' : 'collapsed'}.`;
+    // Created in an effect (not render): a lazy-state initializer counts as
+    // render-time to the refs rule, which would flag the ref reads inside the
+    // deferred gesture callbacks. snapTo/height are stable so this runs once;
+    // handlers stay fresh through effect-synced refs.
+    const [panResponder, setPanResponder] =
+        useState<PanResponderInstance | null>(null);
+    useEffect(() => {
+        setPanResponder(
+            PanResponder.create({
+                // Tap is left to the toggle button (no capture on press down); only a
+                // vertical move beyond slop becomes a sheet drag, so horizontal movement
+                // and taps never hijack touches.
+                onStartShouldSetPanResponder: () => false,
+                onMoveShouldSetPanResponder: (_, gestureState) =>
+                    Math.abs(gestureState.dy) > 6 &&
+                    Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+                onPanResponderGrant: () => {
+                    // Interrupt any snap flight; drag continues from the live height.
+                    animRef.current?.stop();
+                    animRef.current = null;
+                    baseline.current = currentHeight.current;
+                },
+                onPanResponderMove: (_, gestureState) => {
+                    const snaps = snapsRef.current;
+                    height.setValue(
+                        clampMemberSheetHeight(
+                            baseline.current - gestureState.dy,
+                            snaps.collapsed,
+                            snaps.expanded,
+                        ),
+                    );
+                },
+                onPanResponderTerminationRequest: () => true,
+                onPanResponderRelease: (_, gestureState) => {
+                    snapTo(
+                        nextMemberSheetExpanded({
+                            expanded: expandedRef.current,
+                            dragDy: gestureState.dy,
+                            velocityY: gestureState.vy,
+                        }),
+                    );
+                },
+                // A stolen responder (e.g. system interruption) springs back to the start
+                // snap instead of stranding the sheet mid-drag; never dismisses.
+                onPanResponderTerminate: () => {
+                    snapTo(expandedRef.current);
+                },
+            }),
+        );
+    }, [height, snapTo]);
 
-  if (!canExpand) {
-    // Unmeasured or degenerate container: static partial sheet (same content,
-    // sticky trail action, scrolling timeline) with no drag offered.
-    return <View style={styles.mapMemberSheet}><View style={styles.memberSheetHandle} accessible={false} /><MemberSheetBody member={member} history={history} onShowTrail={onShowTrail} /></View>;
-  }
+    const toggleLabel = isExpanded
+        ? "Collapse member details"
+        : "Expand member details";
+    const handleLabel = `Member details, ${isExpanded ? "expanded" : "collapsed"}.`;
 
-  // Progress drives corners/margins/avatar together off the same height value
-  // so the sheet visually settles as one motion (no separate state to drift).
-  const progress = height.interpolate({ inputRange: [collapsed, expanded], outputRange: [0, 1], extrapolate: 'clamp' });
-  const edge = progress.interpolate({ inputRange: [0, 1], outputRange: [12, 0] });
-  const topRadius = progress.interpolate({ inputRange: [0, 1], outputRange: [RADII.sheetLarge, 24] });
-  const avatarScale = progress.interpolate({ inputRange: [0, 1], outputRange: [1, 0.82] });
+    if (!canExpand) {
+        // Unmeasured or degenerate container: static partial sheet (same content,
+        // sticky trail action, scrolling timeline) with no drag offered.
+        return (
+            <View style={styles.mapMemberSheet}>
+                <View style={styles.memberSheetHandle} accessible={false} />
+                <MemberSheetBody
+                    member={member}
+                    history={history}
+                    onShowTrail={onShowTrail}
+                />
+            </View>
+        );
+    }
 
-  return <Animated.View style={[styles.mapMemberSheetBase, { height, left: edge, right: edge, borderTopLeftRadius: topRadius, borderTopRightRadius: topRadius }]}><View style={styles.mapMemberHandleRow}><View style={styles.mapMemberHandleHit} {...(panResponder?.panHandlers ?? {})} accessible accessibilityRole="adjustable" accessibilityLabel={handleLabel} accessibilityHint="Drag up to expand, drag down to collapse." accessibilityActions={[{ name: 'expand', label: 'Expand details' }, { name: 'collapse', label: 'Collapse details' }]} onAccessibilityAction={(event) => { if (event.nativeEvent.actionName === 'expand') snapTo(true); else if (event.nativeEvent.actionName === 'collapse') snapTo(false); }}><View style={styles.mapMemberHandleBar} /></View><Pressable style={styles.mapMemberToggle} onPress={() => snapTo(!expandedRef.current)} accessibilityRole="button" accessibilityLabel={toggleLabel} accessibilityHint="Toggles the member sheet between half and expanded height."><Icon name={isExpanded ? 'chevron-down' : 'chevron-up'} size={20} color={COLORS.purple} /></Pressable></View><MemberSheetBody member={member} history={history} onShowTrail={onShowTrail} avatarScale={avatarScale} /></Animated.View>;
+    // Progress drives corners/margins/avatar together off the same height value
+    // so the sheet visually settles as one motion (no separate state to drift).
+    const progress = height.interpolate({
+        inputRange: [collapsed, expanded],
+        outputRange: [0, 1],
+        extrapolate: "clamp",
+    });
+    const edge = progress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [12, 0],
+    });
+    const topRadius = progress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [RADII.sheetLarge, 24],
+    });
+    const avatarScale = progress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [1, 0.82],
+    });
+
+    return (
+        <Animated.View
+            style={[
+                styles.mapMemberSheetBase,
+                {
+                    height,
+                    left: edge,
+                    right: edge,
+                    borderTopLeftRadius: topRadius,
+                    borderTopRightRadius: topRadius,
+                },
+            ]}
+        >
+            <View style={styles.mapMemberHandleRow}>
+                <View
+                    style={styles.mapMemberHandleHit}
+                    {...(panResponder?.panHandlers ?? {})}
+                    accessible
+                    accessibilityRole="adjustable"
+                    accessibilityLabel={handleLabel}
+                    accessibilityHint="Drag up to expand, drag down to collapse."
+                    accessibilityActions={[
+                        { name: "expand", label: "Expand details" },
+                        { name: "collapse", label: "Collapse details" },
+                    ]}
+                    onAccessibilityAction={(event) => {
+                        if (event.nativeEvent.actionName === "expand")
+                            snapTo(true);
+                        else if (event.nativeEvent.actionName === "collapse")
+                            snapTo(false);
+                    }}
+                >
+                    <View style={styles.mapMemberHandleBar} />
+                </View>
+                <Pressable
+                    style={styles.mapMemberToggle}
+                    onPress={() => snapTo(!expandedRef.current)}
+                    accessibilityRole="button"
+                    accessibilityLabel={toggleLabel}
+                    accessibilityHint="Toggles the member sheet between half and expanded height."
+                >
+                    <Icon
+                        name={isExpanded ? "chevron-down" : "chevron-up"}
+                        size={20}
+                        color={COLORS.purple}
+                    />
+                </Pressable>
+            </View>
+            <MemberSheetBody
+                member={member}
+                history={history}
+                onShowTrail={onShowTrail}
+                avatarScale={avatarScale}
+            />
+        </Animated.View>
+    );
 }
 
 function MemberHistoryTimeline({ history }: { history: HistoryPoint[] }) {
-  // Renders only already-loaded points ({ latitude, longitude, recordedAt });
-  // newest first for readability. Coordinates shown as-is when no address
-  // exists; nothing is fabricated (no addresses, statuses, or distances).
-  const newestFirst = [...history].reverse();
-  return <View style={styles.memberHistoryCard} accessible accessibilityLabel={history.length ? `Past 24-hour trail, ${history.length} saved points` : 'Past 24-hour trail, no points yet'}><Text style={styles.memberHistoryTitle}>Past 24-hour trail</Text><Text style={styles.memberHistorySubtitle}>{history.length ? `${history.length} saved ${history.length === 1 ? 'point' : 'points'}` : 'No trail yet'}</Text>{newestFirst.map((point, index) => <View key={`${point.recordedAt}-${index}`} style={styles.memberHistoryRow}><View style={styles.memberHistoryDot} /><View style={styles.memberHistoryCopy}><Text style={styles.memberHistoryTime}>{new Date(point.recordedAt).toLocaleString()}</Text><Text style={styles.memberHistoryCoords}>{point.latitude.toFixed(5)}, {point.longitude.toFixed(5)}</Text></View></View>)}</View>;
+    // Renders only already-loaded points ({ latitude, longitude, recordedAt });
+    // newest first for readability. Coordinates shown as-is when no address
+    // exists; nothing is fabricated (no addresses, statuses, or distances).
+    const newestFirst = [...history].reverse();
+    return (
+        <View
+            style={styles.memberHistoryCard}
+            accessible
+            accessibilityLabel={
+                history.length
+                    ? `Past 24-hour trail, ${history.length} saved points`
+                    : "Past 24-hour trail, no points yet"
+            }
+        >
+            <Text style={styles.memberHistoryTitle}>Past 24-hour trail</Text>
+            <Text style={styles.memberHistorySubtitle}>
+                {history.length
+                    ? `${history.length} saved ${history.length === 1 ? "point" : "points"}`
+                    : "No trail yet"}
+            </Text>
+            {newestFirst.map((point, index) => (
+                <View
+                    key={`${point.recordedAt}-${index}`}
+                    style={styles.memberHistoryRow}
+                >
+                    <View style={styles.memberHistoryDot} />
+                    <View style={styles.memberHistoryCopy}>
+                        <Text style={styles.memberHistoryTime}>
+                            {new Date(point.recordedAt).toLocaleString()}
+                        </Text>
+                        <Text style={styles.memberHistoryCoords}>
+                            {point.latitude.toFixed(5)},{" "}
+                            {point.longitude.toFixed(5)}
+                        </Text>
+                    </View>
+                </View>
+            ))}
+        </View>
+    );
 }
 
-function DetailStat({ icon, label, value }: { icon: IconName; label: string; value: string }) {
-  return <View style={styles.detailStat}><Icon name={icon} size={17} color={COLORS.coral} /><Text style={styles.detailStatLabel}>{label}</Text><Text style={styles.detailStatValue}>{value}</Text></View>;
+function DetailStat({
+    icon,
+    label,
+    value,
+}: {
+    icon: IconName;
+    label: string;
+    value: string;
+}) {
+    return (
+        <View style={styles.detailStat}>
+            <Icon name={icon} size={17} color={COLORS.coral} />
+            <Text style={styles.detailStatLabel}>{label}</Text>
+            <Text style={styles.detailStatValue}>{value}</Text>
+        </View>
+    );
 }
 
 export default function App() {
-  const router = useRouter();
-  const pathname = usePathname();
-  const activeTab: Tab = pathname === '/circle' || pathname === '/activity' || pathname === '/you' ? pathname.slice(1) as Tab : 'map';
-  const [locationEnabled, setLocationEnabled] = useState(false);
-  const [locationReady, setLocationReady] = useState(Platform.OS === 'web');
-  const [backgroundReady, setBackgroundReady] = useState(false);
-  const [currentCoordinate, setCurrentCoordinate] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [currentMovement, setCurrentMovement] = useState<{ value: Movement; recordedAt: string } | null>(null);
-  const [circle, setCircle] = useState<CircleConfig | null>(null);
-  const [remoteSnapshots, setRemoteSnapshots] = useState<Record<string, CircleSnapshot>>({});
-  const [locationHistory, setLocationHistory] = useState<Record<string, HistoryPoint[]>>({});
-  const [trailMemberId, setTrailMemberId] = useState<string | null>(null);
-  const [checkIns, setCheckIns] = useState<{ deviceId: string; payload: CheckIn }[]>([]);
-  const [circleConnected, setCircleConnected] = useState(false);
-  const [now, setNow] = useState(0);
-  const [checkInVisible, setCheckInVisible] = useState(false);
-  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
-  const [toast, setToast] = useState('');
-  const [profile, setProfile] = useState<DeviceProfile>({ name: 'This device', home: null, battery: null });
-  const watcher = useRef<Location.LocationSubscription | null>(null);
-  const circleRef = useRef<CircleConfig | null>(null);
-  const lastSharedTimestamp = useRef(0);
-  // Current-place stay for the "At ... since ..." row. A ref (not state)
-  // survives tab mounts; SecureStore persistence survives restarts. Live
-  // observation always wins over a stored stay (see rehydrate effect below).
-  const stayRef = useRef<StayState>(null);
-  const [selfStaySince, setSelfStaySince] = useState<number | null>(null);
-  const [selfAddress, setSelfAddress] = useState<string | null>(null);
-  const lastAddressBucket = useRef<string | null>(null);
-
-  const shareLocation = useCallback((position: Location.LocationObject) => {
-    // iOS may deliver fixes every second; cap foreground network updates at once per 5s.
-    if (position.timestamp - lastSharedTimestamp.current < 5000) return;
-    lastSharedTimestamp.current = position.timestamp;
-    const location = locationWithMovement(position);
-    const recordedAt = new Date(position.timestamp).toISOString();
-    setCurrentCoordinate({ latitude: location.latitude, longitude: location.longitude });
-    setCurrentMovement({ value: parseMovement(location), recordedAt });
-    // Stay start is the first fix observed at this place, never the latest
-    // update: updateStay keeps the original start inside GPS-noise tolerance
-    // and clears the stay while classified as moving.
-    const nextStay = updateStay(stayRef.current, {
-      latitude: location.latitude,
-      longitude: location.longitude,
-      timestamp: position.timestamp,
-      accuracy: typeof location.accuracy === 'number' ? location.accuracy : null,
-      moving: location.activity != null && location.activity !== 'stationary',
+    const router = useRouter();
+    const pathname = usePathname();
+    const activeTab: Tab =
+        pathname === "/circle" ||
+        pathname === "/activity" ||
+        pathname === "/you"
+            ? (pathname.slice(1) as Tab)
+            : "map";
+    const [locationEnabled, setLocationEnabled] = useState(false);
+    const [locationReady, setLocationReady] = useState(Platform.OS === "web");
+    const [backgroundReady, setBackgroundReady] = useState(false);
+    const [currentCoordinate, setCurrentCoordinate] = useState<{
+        latitude: number;
+        longitude: number;
+    } | null>(null);
+    const [currentMovement, setCurrentMovement] = useState<{
+        value: Movement;
+        recordedAt: string;
+    } | null>(null);
+    const [circle, setCircle] = useState<CircleConfig | null>(null);
+    const [remoteSnapshots, setRemoteSnapshots] = useState<
+        Record<string, CircleSnapshot>
+    >({});
+    const [locationHistory, setLocationHistory] = useState<
+        Record<string, HistoryPoint[]>
+    >({});
+    const [trailMemberId, setTrailMemberId] = useState<string | null>(null);
+    const [checkIns, setCheckIns] = useState<
+        { deviceId: string; payload: CheckIn }[]
+    >([]);
+    const [circleConnected, setCircleConnected] = useState(false);
+    const [now, setNow] = useState(0);
+    const [checkInVisible, setCheckInVisible] = useState(false);
+    const [selectedMember, setSelectedMember] = useState<Member | null>(null);
+    const [toast, setToast] = useState("");
+    const [profile, setProfile] = useState<DeviceProfile>({
+        name: "This device",
+        home: null,
+        battery: null,
     });
-    if (JSON.stringify(nextStay) !== JSON.stringify(stayRef.current)) {
-      stayRef.current = nextStay;
-      void secureStorage.setItemAsync(SELF_STAY_KEY, JSON.stringify(nextStay)).catch(() => {});
-    }
-    setSelfStaySince(nextStay?.sinceMs ?? null);
-    const currentCircle = circleRef.current;
-    if (currentCircle) void publishLocation(currentCircle, location, recordedAt).catch((error) => console.warn('[Free360] Foreground location queued:', error));
-  }, []);
+    const watcher = useRef<Location.LocationSubscription | null>(null);
+    const circleRef = useRef<CircleConfig | null>(null);
+    const lastSharedTimestamp = useRef(0);
+    // Current-place stay for the "At ... since ..." row. A ref (not state)
+    // survives tab mounts; SecureStore persistence survives restarts. Live
+    // observation always wins over a stored stay (see rehydrate effect below).
+    const stayRef = useRef<StayState>(null);
+    const [selfStaySince, setSelfStaySince] = useState<number | null>(null);
+    const [selfAddress, setSelfAddress] = useState<string | null>(null);
+    const lastAddressBucket = useRef<string | null>(null);
 
-  const refreshCircleData = useCallback(async () => {
-    const currentCircle = circleRef.current;
-    if (!currentCircle) return;
-    try {
-      const [snapshots, history] = await Promise.all([fetchCircleSnapshots(currentCircle), fetchLocationHistory(currentCircle)]);
-      setRemoteSnapshots((current) => {
-        let changed = false;
-        const merged = { ...current };
-        for (const [deviceId, snapshot] of Object.entries(snapshots)) {
-          if (deviceId === currentCircle.deviceId) continue;
-          const existing = merged[deviceId];
-          if (!existing || Date.parse(snapshot.recordedAt) > Date.parse(existing.recordedAt)) {
-            merged[deviceId] = snapshot;
-            changed = true;
-          }
+    const shareLocation = useCallback((position: Location.LocationObject) => {
+        // iOS may deliver fixes every second; cap foreground network updates at once per 5s.
+        if (position.timestamp - lastSharedTimestamp.current < 5000) return;
+        lastSharedTimestamp.current = position.timestamp;
+        const location = locationWithMovement(position);
+        const recordedAt = new Date(position.timestamp).toISOString();
+        setCurrentCoordinate({
+            latitude: location.latitude,
+            longitude: location.longitude,
+        });
+        setCurrentMovement({ value: parseMovement(location), recordedAt });
+        // Stay start is the first fix observed at this place, never the latest
+        // update: updateStay keeps the original start inside GPS-noise tolerance
+        // and clears the stay while classified as moving.
+        const nextStay = updateStay(stayRef.current, {
+            latitude: location.latitude,
+            longitude: location.longitude,
+            timestamp: position.timestamp,
+            accuracy:
+                typeof location.accuracy === "number"
+                    ? location.accuracy
+                    : null,
+            moving:
+                location.activity != null && location.activity !== "stationary",
+        });
+        if (JSON.stringify(nextStay) !== JSON.stringify(stayRef.current)) {
+            stayRef.current = nextStay;
+            void secureStorage
+                .setItemAsync(SELF_STAY_KEY, JSON.stringify(nextStay))
+                .catch(() => {});
         }
-        return changed ? merged : current;
-      });
-      setLocationHistory(history);
-    } catch (error) {
-      console.warn('[Free360] Could not refresh circle locations:', error);
-    }
-  }, []);
+        setSelfStaySince(nextStay?.sinceMs ?? null);
+        const currentCircle = circleRef.current;
+        if (currentCircle)
+            void publishLocation(currentCircle, location, recordedAt).catch(
+                (error) =>
+                    console.warn(
+                        "[Free360] Foreground location queued:",
+                        error,
+                    ),
+            );
+    }, []);
 
-  const publishCurrentPosition = useCallback(async () => {
-    const currentCircle = circleRef.current;
-    if (!currentCircle || Platform.OS === 'web') return;
-    try {
-      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      shareLocation(position);
-    } catch (error) {
-      console.warn('[Free360] Periodic location publish failed:', error);
-    }
-  }, [shareLocation]);
-
-  useEffect(() => {
-    if (!circle) return;
-    void refreshCircleData();
-    const timer = setInterval(() => {
-      void refreshCircleData();
-      if (locationEnabled) void publishCurrentPosition();
-    }, REFRESH_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, [circle, locationEnabled, refreshCircleData, publishCurrentPosition]);
-
-  useEffect(() => {
-    if (circleConnected) void flushHomeAlerts().catch(error => console.warn('[Free360] Home alerts queued:', error));
-  }, [circleConnected]);
-
-  useEffect(() => {
-    void loadDeviceProfile().then(async value => { const level = await Battery.getBatteryLevelAsync().catch(() => -1); setProfile({ ...value, battery: level >= 0 ? Math.round(level * 100) : null }); }).catch(console.warn);
-  }, [pathname]);
-
-  useEffect(() => {
-    if (Platform.OS === 'web') return;
-    const subscription = Battery.addBatteryLevelListener(({ batteryLevel }) => {
-      setProfile(current => ({ ...current, battery: batteryLevel >= 0 ? Math.round(batteryLevel * 100) : null }));
-      void refreshDeviceSnapshot().catch(error => console.warn('[Free360] Battery update queued:', error));
-    });
-    return () => subscription.remove();
-  }, []);
-
-  useEffect(() => {
-    if (circle) void syncHomes(remoteSnapshots).catch(error => console.warn('[Free360] Home monitoring:', error));
-  }, [circle, remoteSnapshots, profile]);
-
-  useEffect(() => {
-    void refreshHomeMonitoring().catch(error => console.warn('[Free360] Home monitoring:', error));
-  }, [backgroundReady]);
-
-  useEffect(() => {
-    const firstTick = setTimeout(() => setNow(Date.now()), 0);
-    const timer = setInterval(() => setNow(Date.now()), 30000);
-    return () => { clearTimeout(firstTick); clearInterval(timer); };
-  }, []);
-
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(''), 2800);
-    return () => clearTimeout(timer);
-  }, [toast]);
-
-  useEffect(() => () => { watcher.current?.remove(); }, []);
-
-  useEffect(() => {
-    // Re-adopt the persisted stay only when no live fix got there first.
-    let live = true;
-    void secureStorage.getItemAsync(SELF_STAY_KEY).then((raw) => {
-      if (!live || stayRef.current || !raw) return;
-      const stay = parseStay(JSON.parse(raw));
-      if (stay) {
-        stayRef.current = stay;
-        setSelfStaySince(stay.sinceMs);
-      }
-    }).catch(() => {});
-    return () => { live = false; };
-  }, []);
-
-  useEffect(() => {
-    // One lookup per address bucket; jitter inside the bucket is served from
-    // cache and superseded buckets are ignored when their lookup resolves.
-    if (!locationEnabled || !isValidCoordinate(currentCoordinate) || Platform.OS === 'web') return;
-    const coordinate = currentCoordinate;
-    // Drop the previous bucket's address the moment the bucket changes so a
-    // stale street never lingers while the new lookup is in flight.
-    if (addressBucket(coordinate) !== lastAddressBucket.current) {
-      lastAddressBucket.current = addressBucket(coordinate);
-      setSelfAddress(null);
-    }
-    let live = true;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    const attempt = () => {
-      void selfAddressResolver.resolve(coordinate).then((text) => {
-        if (!live) return;
-        setSelfAddress((current) => (current === text ? current : text));
-        // Failures/empty results retry after the cooldown even while
-        // stationary: fixes may stop arriving, so the timer (not just the
-        // next fix) guarantees recovery. Success schedules nothing.
-        if (text == null) {
-          retryTimer = setTimeout(() => { if (live) attempt(); }, ADDRESS_FAILURE_RETRY_MS);
+    const refreshCircleData = useCallback(async () => {
+        const currentCircle = circleRef.current;
+        if (!currentCircle) return;
+        try {
+            const [snapshots, history] = await Promise.all([
+                fetchCircleSnapshots(currentCircle),
+                fetchLocationHistory(currentCircle),
+            ]);
+            setRemoteSnapshots((current) => {
+                let changed = false;
+                const merged = { ...current };
+                for (const [deviceId, snapshot] of Object.entries(snapshots)) {
+                    if (deviceId === currentCircle.deviceId) continue;
+                    const existing = merged[deviceId];
+                    if (
+                        !existing ||
+                        Date.parse(snapshot.recordedAt) >
+                            Date.parse(existing.recordedAt)
+                    ) {
+                        merged[deviceId] = snapshot;
+                        changed = true;
+                    }
+                }
+                return changed ? merged : current;
+            });
+            setLocationHistory(history);
+        } catch (error) {
+            console.warn(
+                "[Free360] Could not refresh circle locations:",
+                error,
+            );
         }
-      });
+    }, []);
+
+    const publishCurrentPosition = useCallback(async () => {
+        const currentCircle = circleRef.current;
+        if (!currentCircle || Platform.OS === "web") return;
+        try {
+            const position = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.High,
+            });
+            shareLocation(position);
+        } catch (error) {
+            console.warn("[Free360] Periodic location publish failed:", error);
+        }
+    }, [shareLocation]);
+
+    useEffect(() => {
+        if (!circle) return;
+        void refreshCircleData();
+        const timer = setInterval(() => {
+            void refreshCircleData();
+            if (locationEnabled) void publishCurrentPosition();
+        }, REFRESH_INTERVAL_MS);
+        return () => clearInterval(timer);
+    }, [circle, locationEnabled, refreshCircleData, publishCurrentPosition]);
+
+    useEffect(() => {
+        if (circleConnected)
+            void flushHomeAlerts().catch((error) =>
+                console.warn("[Free360] Home alerts queued:", error),
+            );
+    }, [circleConnected]);
+
+    useEffect(() => {
+        void loadDeviceProfile()
+            .then(async (value) => {
+                const level = await Battery.getBatteryLevelAsync().catch(
+                    () => -1,
+                );
+                setProfile({
+                    ...value,
+                    battery: level >= 0 ? Math.round(level * 100) : null,
+                });
+            })
+            .catch(console.warn);
+    }, [pathname]);
+
+    useEffect(() => {
+        if (Platform.OS === "web") return;
+        const subscription = Battery.addBatteryLevelListener(
+            ({ batteryLevel }) => {
+                setProfile((current) => ({
+                    ...current,
+                    battery:
+                        batteryLevel >= 0
+                            ? Math.round(batteryLevel * 100)
+                            : null,
+                }));
+                void refreshDeviceSnapshot().catch((error) =>
+                    console.warn("[Free360] Battery update queued:", error),
+                );
+            },
+        );
+        return () => subscription.remove();
+    }, []);
+
+    useEffect(() => {
+        if (circle)
+            void syncHomes(remoteSnapshots).catch((error) =>
+                console.warn("[Free360] Home monitoring:", error),
+            );
+    }, [circle, remoteSnapshots, profile]);
+
+    useEffect(() => {
+        void refreshHomeMonitoring().catch((error) =>
+            console.warn("[Free360] Home monitoring:", error),
+        );
+    }, [backgroundReady]);
+
+    useEffect(() => {
+        const firstTick = setTimeout(() => setNow(Date.now()), 0);
+        const timer = setInterval(() => setNow(Date.now()), 30000);
+        return () => {
+            clearTimeout(firstTick);
+            clearInterval(timer);
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!toast) return;
+        const timer = setTimeout(() => setToast(""), 2800);
+        return () => clearTimeout(timer);
+    }, [toast]);
+
+    useEffect(
+        () => () => {
+            watcher.current?.remove();
+        },
+        [],
+    );
+
+    useEffect(() => {
+        // Re-adopt the persisted stay only when no live fix got there first.
+        let live = true;
+        void secureStorage
+            .getItemAsync(SELF_STAY_KEY)
+            .then((raw) => {
+                if (!live || stayRef.current || !raw) return;
+                const stay = parseStay(JSON.parse(raw));
+                if (stay) {
+                    stayRef.current = stay;
+                    setSelfStaySince(stay.sinceMs);
+                }
+            })
+            .catch(() => {});
+        return () => {
+            live = false;
+        };
+    }, []);
+
+    useEffect(() => {
+        // One lookup per address bucket; jitter inside the bucket is served from
+        // cache and superseded buckets are ignored when their lookup resolves.
+        if (
+            !locationEnabled ||
+            !isValidCoordinate(currentCoordinate) ||
+            Platform.OS === "web"
+        )
+            return;
+        const coordinate = currentCoordinate;
+        // Drop the previous bucket's address the moment the bucket changes so a
+        // stale street never lingers while the new lookup is in flight.
+        if (addressBucket(coordinate) !== lastAddressBucket.current) {
+            lastAddressBucket.current = addressBucket(coordinate);
+            setSelfAddress(null);
+        }
+        let live = true;
+        let retryTimer: ReturnType<typeof setTimeout> | null = null;
+        const attempt = () => {
+            void selfAddressResolver.resolve(coordinate).then((text) => {
+                if (!live) return;
+                setSelfAddress((current) =>
+                    current === text ? current : text,
+                );
+                // Failures/empty results retry after the cooldown even while
+                // stationary: fixes may stop arriving, so the timer (not just the
+                // next fix) guarantees recovery. Success schedules nothing.
+                if (text == null) {
+                    retryTimer = setTimeout(() => {
+                        if (live) attempt();
+                    }, ADDRESS_FAILURE_RETRY_MS);
+                }
+            });
+        };
+        attempt();
+        // Cleanup on disable/unmount/bucket change: no more attempts, no late
+        // resolutions, no orphaned timers, no overlapping retries.
+        return () => {
+            live = false;
+            if (retryTimer !== null) clearTimeout(retryTimer);
+        };
+    }, [locationEnabled, currentCoordinate]);
+
+    useEffect(() => {
+        if (!locationEnabled || Platform.OS === "web") return;
+        let cancelled = false;
+        let subscription: Location.LocationSubscription | null = null;
+        void Location.getMotionActivityPermissionsAsync()
+            .then(async (permission) => {
+                if (!permission.granted || cancelled) return;
+                const result = await Location.watchMotionActivityAsync(
+                    updateMotionActivity,
+                    () => updateMotionActivity(null),
+                );
+                if (cancelled) result.remove();
+                else subscription = result;
+            })
+            .catch(() => updateMotionActivity(null));
+        return () => {
+            cancelled = true;
+            subscription?.remove();
+            updateMotionActivity(null);
+        };
+    }, [locationEnabled]);
+
+    useEffect(() => {
+        let cancelled = false;
+        if (Platform.OS === "web") return;
+        void Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK)
+            .then(async (registered) => {
+                if (cancelled) return;
+                setBackgroundReady(registered);
+                setLocationEnabled(registered);
+                if (registered) {
+                    const permission =
+                        await Location.getForegroundPermissionsAsync();
+                    if (permission.granted && !watcher.current && !cancelled) {
+                        watcher.current = await Location.watchPositionAsync(
+                            {
+                                accuracy: Location.Accuracy.High,
+                                distanceInterval: 0,
+                                timeInterval: 5000,
+                            },
+                            shareLocation,
+                        );
+                    }
+                }
+            })
+            .catch((error) =>
+                console.warn(
+                    "[Free360] Could not inspect background task:",
+                    error,
+                ),
+            )
+            .finally(() => {
+                if (!cancelled) setLocationReady(true);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [shareLocation]);
+
+    useEffect(() => {
+        void loadCircle()
+            .then((savedCircle) => {
+                if (circleRef.current?.circleId !== savedCircle?.circleId) {
+                    setRemoteSnapshots({});
+                    setLocationHistory({});
+                    setTrailMemberId(null);
+                    setCheckIns([]);
+                    setCircleConnected(false);
+                    setCircle(savedCircle);
+                }
+                circleRef.current = savedCircle;
+            })
+            .catch((error) =>
+                console.warn("[Free360] Could not load circle:", error),
+            );
+    }, [pathname]);
+
+    useEffect(() => {
+        if (!circle) return;
+        const subscription = subscribeToCircle(
+            circle,
+            (update) => {
+                if (
+                    update.kind === "snapshot" &&
+                    update.deviceId !== circle.deviceId
+                )
+                    setRemoteSnapshots((current) => ({
+                        ...current,
+                        [update.deviceId]: update.payload,
+                    }));
+                if (update.kind === "checkin")
+                    setCheckIns((current) =>
+                        current.some(
+                            (item) => item.payload.id === update.payload.id,
+                        )
+                            ? current
+                            : [
+                                  {
+                                      deviceId: update.deviceId,
+                                      payload: update.payload,
+                                  },
+                                  ...current,
+                              ]
+                                  .sort(
+                                      (a, b) =>
+                                          Date.parse(b.payload.recordedAt) -
+                                          Date.parse(a.payload.recordedAt),
+                                  )
+                                  .slice(0, 100),
+                    );
+            },
+            setCircleConnected,
+        );
+        return () => subscription.close();
+    }, [circle]);
+
+    const mapMembers = useMemo(() => {
+        if (!circle) return [];
+        const selfName = displayNameFor(profile.name, SELF_FALLBACK_NAME);
+        const selfAvatar = avatarForProfile(profile as { avatar?: unknown });
+        const localMember: Member = {
+            id: "you",
+            name: selfName,
+            initials: initialsForName(selfName),
+            avatar: selfAvatar,
+            movement: freshMovement(
+                currentMovement?.value ?? EMPTY_MOVEMENT,
+                currentMovement?.recordedAt,
+                now,
+            ),
+            battery: profile.battery,
+            home: profile.home,
+            color: COLORS.deepPurple,
+            coordinate: isValidCoordinate(currentCoordinate)
+                ? {
+                      latitude: currentCoordinate.latitude,
+                      longitude: currentCoordinate.longitude,
+                  }
+                : null,
+            role: circle.isOwner ? "Circle owner" : "Circle member",
+            status: locationEnabled ? "Location enabled" : "Sharing paused",
+            lastSeen:
+                locationEnabled && currentCoordinate
+                    ? "On this device"
+                    : "No live location",
+            isYou: true,
+            isPaused: !locationEnabled || !currentCoordinate,
+            historyCount: locationHistory[circle.deviceId]?.length ?? 0,
+        };
+        const remoteMembers: Member[] = Object.entries(remoteSnapshots).map(
+            ([deviceId, snapshot], index) => {
+                const remoteProfile = snapshot.profile as
+                    | {
+                          name?: unknown;
+                          avatar?: unknown;
+                          battery?: unknown;
+                          home?: unknown;
+                      }
+                    | undefined;
+                const remoteName =
+                    typeof remoteProfile?.name === "string" &&
+                    remoteProfile.name.trim()
+                        ? remoteProfile.name.trim()
+                        : `Member ${deviceId.slice(0, 6)}`;
+                const remoteHome = (snapshot.profile?.home ??
+                    null) as Home | null;
+                const remoteMovement =
+                    snapshot.type === "location"
+                        ? freshMovement(
+                              parseMovement(snapshot),
+                              snapshot.recordedAt,
+                              now,
+                          )
+                        : EMPTY_MOVEMENT;
+                const staySinceMs =
+                    snapshot.type === "location" &&
+                    isStationaryMovement(remoteMovement)
+                        ? observedStaySince([
+                              ...(locationHistory[deviceId] ?? []),
+                              {
+                                  latitude: snapshot.latitude,
+                                  longitude: snapshot.longitude,
+                                  recordedAt: snapshot.recordedAt,
+                              },
+                          ])
+                        : null;
+                return {
+                    id: deviceId,
+                    name: remoteName,
+                    initials:
+                        typeof remoteProfile?.name === "string" &&
+                        remoteProfile.name.trim()
+                            ? initialsForName(remoteProfile.name)
+                            : `M${index + 1}`,
+                    avatar: avatarForProfile({ avatar: remoteProfile?.avatar }),
+                    battery: snapshot.profile?.battery,
+                    home: remoteHome,
+                    role: "Circle member",
+                    status:
+                        snapshot.type === "paused"
+                            ? "Sharing paused"
+                            : now - Date.parse(snapshot.recordedAt) >
+                                STALE_AFTER_MS
+                              ? "Location stale"
+                              : "Location shared",
+                    lastSeen: ageLabel(snapshot.recordedAt, now),
+                    coordinate:
+                        snapshot.type === "location" &&
+                        isValidCoordinate({
+                            latitude: snapshot.latitude,
+                            longitude: snapshot.longitude,
+                        })
+                            ? {
+                                  latitude: snapshot.latitude,
+                                  longitude: snapshot.longitude,
+                              }
+                            : null,
+                    movement: remoteMovement,
+                    staySinceMs,
+                    color: AVATAR_COLORS[index % AVATAR_COLORS.length],
+                    isPaused: snapshot.type === "paused",
+                    isStale:
+                        snapshot.type === "location" &&
+                        now - Date.parse(snapshot.recordedAt) > STALE_AFTER_MS,
+                    historyCount: locationHistory[deviceId]?.length ?? 0,
+                };
+            },
+        );
+        return [localMember, ...remoteMembers];
+    }, [
+        circle,
+        currentCoordinate,
+        currentMovement,
+        locationEnabled,
+        remoteSnapshots,
+        now,
+        profile,
+        locationHistory,
+    ]);
+
+    const trailMember = useMemo(
+        () =>
+            trailMemberId
+                ? (mapMembers.find((member) => member.id === trailMemberId) ??
+                  null)
+                : null,
+        [mapMembers, trailMemberId],
+    );
+    const trailCoordinates = useMemo(() => {
+        if (!circle || !trailMemberId) return [];
+        const deviceId =
+            trailMemberId === "you" ? circle.deviceId : trailMemberId;
+        return (locationHistory[deviceId] ?? []).map((point) => ({
+            latitude: point.latitude,
+            longitude: point.longitude,
+        }));
+    }, [circle, trailMemberId, locationHistory]);
+
+    const showTrail = (member: Member) => {
+        setSelectedMember(null);
+        setTrailMemberId(member.id);
+        void refreshCircleData();
     };
-    attempt();
-    // Cleanup on disable/unmount/bucket change: no more attempts, no late
-    // resolutions, no orphaned timers, no overlapping retries.
-    return () => {
-      live = false;
-      if (retryTimer !== null) clearTimeout(retryTimer);
+
+    const requestLocation = async () => {
+        if (!circleRef.current) {
+            router.push("/create-circle");
+            return;
+        }
+        if (Platform.OS === "web") {
+            setToast("Location sharing is available in the mobile app.");
+            return;
+        }
+        try {
+            const foreground =
+                await Location.requestForegroundPermissionsAsync();
+            if (foreground.status !== "granted") {
+                setToast(
+                    "Location permission is needed to share your location.",
+                );
+                return;
+            }
+
+            // Motion access is optional: location sharing works even when it is denied.
+            await Location.requestMotionActivityPermissionsAsync().catch(
+                () => null,
+            );
+            const current = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.High,
+            });
+            shareLocation(current);
+            if (!watcher.current) {
+                watcher.current = await Location.watchPositionAsync(
+                    {
+                        accuracy: Location.Accuracy.High,
+                        distanceInterval: 0,
+                        timeInterval: 5000,
+                    },
+                    shareLocation,
+                );
+            }
+
+            let backgroundStarted = false;
+            try {
+                let background = await Location.getBackgroundPermissionsAsync();
+                if (!background.granted) {
+                    const proceed =
+                        Platform.OS !== "android" ||
+                        (await new Promise<boolean>((resolve) => {
+                            Alert.alert(
+                                "Allow background location",
+                                "Free360 needs background location to share with your circle and detect home arrivals while the app is closed. On the next screen, choose Allow all the time for Free360.",
+                                [
+                                    {
+                                        text: "While open only",
+                                        style: "cancel",
+                                        onPress: () => resolve(false),
+                                    },
+                                    {
+                                        text: "Continue",
+                                        onPress: () => resolve(true),
+                                    },
+                                ],
+                                {
+                                    cancelable: true,
+                                    onDismiss: () => resolve(false),
+                                },
+                            );
+                        }));
+                    if (proceed)
+                        background =
+                            await Location.requestBackgroundPermissionsAsync();
+                }
+                if (background.status === "granted") {
+                    if (
+                        !(await Location.hasStartedLocationUpdatesAsync(
+                            BACKGROUND_LOCATION_TASK,
+                        ))
+                    )
+                        await Location.startLocationUpdatesAsync(
+                            BACKGROUND_LOCATION_TASK,
+                            {
+                                accuracy: Location.Accuracy.High,
+                                distanceInterval: 0,
+                                timeInterval: 30000,
+                                pausesUpdatesAutomatically: false,
+                                showsBackgroundLocationIndicator: true,
+                                foregroundService: {
+                                    notificationTitle:
+                                        "Free360 location sharing",
+                                    notificationBody:
+                                        "Your circle can see your location.",
+                                    notificationColor: COLORS.coral,
+                                },
+                            },
+                        );
+                    backgroundStarted = true;
+                    setBackgroundReady(true);
+                } else {
+                    setBackgroundReady(false);
+                }
+            } catch {
+                setBackgroundReady(false);
+            }
+            setLocationEnabled(true);
+            setToast(
+                backgroundStarted
+                    ? "Location sharing is on, including background updates."
+                    : "Sharing while open. Enable Allow all the time in Free360 location settings for background updates.",
+            );
+        } catch {
+            setToast(
+                "We couldn’t access your location. Check device permissions.",
+            );
+        }
     };
-  }, [locationEnabled, currentCoordinate]);
 
-  useEffect(() => {
-    if (!locationEnabled || Platform.OS === 'web') return;
-    let cancelled = false;
-    let subscription: Location.LocationSubscription | null = null;
-    void Location.getMotionActivityPermissionsAsync().then(async permission => {
-      if (!permission.granted || cancelled) return;
-      const result = await Location.watchMotionActivityAsync(updateMotionActivity, () => updateMotionActivity(null));
-      if (cancelled) result.remove();
-      else subscription = result;
-    }).catch(() => updateMotionActivity(null));
-    return () => { cancelled = true; subscription?.remove(); updateMotionActivity(null); };
-  }, [locationEnabled]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (Platform.OS === 'web') return;
-    void Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK).then(async (registered) => {
-      if (cancelled) return;
-      setBackgroundReady(registered);
-      setLocationEnabled(registered);
-      if (registered) {
-        const permission = await Location.getForegroundPermissionsAsync();
-        if (permission.granted && !watcher.current && !cancelled) {
-          watcher.current = await Location.watchPositionAsync({ accuracy: Location.Accuracy.High, distanceInterval: 0, timeInterval: 5000 }, shareLocation);
+    const stopLocation = async () => {
+        try {
+            if (
+                await Location.hasStartedLocationUpdatesAsync(
+                    BACKGROUND_LOCATION_TASK,
+                )
+            )
+                await Location.stopLocationUpdatesAsync(
+                    BACKGROUND_LOCATION_TASK,
+                );
+        } catch (error) {
+            if (backgroundReady) {
+                console.warn(
+                    "[Free360] Could not stop background sharing:",
+                    error,
+                );
+                setToast(
+                    "Could not stop background sharing. Check device settings and try again.",
+                );
+                return;
+            }
         }
-      }
-    }).catch((error) => console.warn('[Free360] Could not inspect background task:', error)).finally(() => { if (!cancelled) setLocationReady(true); });
-    return () => { cancelled = true; };
-  }, [shareLocation]);
-
-  useEffect(() => {
-    void loadCircle().then((savedCircle) => {
-      if (circleRef.current?.circleId !== savedCircle?.circleId) {
-        setRemoteSnapshots({});
-        setLocationHistory({});
-        setTrailMemberId(null);
-        setCheckIns([]);
-        setCircleConnected(false);
-        setCircle(savedCircle);
-      }
-      circleRef.current = savedCircle;
-    }).catch((error) => console.warn('[Free360] Could not load circle:', error));
-  }, [pathname]);
-
-  useEffect(() => {
-    if (!circle) return;
-    const subscription = subscribeToCircle(circle, (update) => {
-      if (update.kind === 'snapshot' && update.deviceId !== circle.deviceId) setRemoteSnapshots((current) => ({ ...current, [update.deviceId]: update.payload }));
-      if (update.kind === 'checkin') setCheckIns((current) => current.some((item) => item.payload.id === update.payload.id) ? current : [{ deviceId: update.deviceId, payload: update.payload }, ...current].sort((a, b) => Date.parse(b.payload.recordedAt) - Date.parse(a.payload.recordedAt)).slice(0, 100));
-    }, setCircleConnected);
-    return () => subscription.close();
-  }, [circle]);
-
-  const mapMembers = useMemo(() => {
-    if (!circle) return [];
-    const selfName = displayNameFor(profile.name, SELF_FALLBACK_NAME);
-    const selfAvatar = avatarForProfile(profile as { avatar?: unknown });
-    const localMember: Member = { id: 'you', name: selfName, initials: initialsForName(selfName), avatar: selfAvatar, movement: freshMovement(currentMovement?.value ?? EMPTY_MOVEMENT, currentMovement?.recordedAt, now), battery: profile.battery, home: profile.home, color: COLORS.deepPurple, coordinate: isValidCoordinate(currentCoordinate) ? { latitude: currentCoordinate.latitude, longitude: currentCoordinate.longitude } : null, role: circle.isOwner ? 'Circle owner' : 'Circle member', status: locationEnabled ? 'Location enabled' : 'Sharing paused', lastSeen: locationEnabled && currentCoordinate ? 'On this device' : 'No live location', isYou: true, isPaused: !locationEnabled || !currentCoordinate, historyCount: locationHistory[circle.deviceId]?.length ?? 0 };
-    const remoteMembers: Member[] = Object.entries(remoteSnapshots).map(([deviceId, snapshot], index) => {
-      const remoteProfile = snapshot.profile as { name?: unknown; avatar?: unknown; battery?: unknown; home?: unknown } | undefined;
-      const remoteName = typeof remoteProfile?.name === 'string' && remoteProfile.name.trim() ? remoteProfile.name.trim() : `Member ${deviceId.slice(0, 6)}`;
-      const remoteHome = (snapshot.profile?.home ?? null) as Home | null;
-      const remoteMovement = snapshot.type === 'location' ? freshMovement(parseMovement(snapshot), snapshot.recordedAt, now) : EMPTY_MOVEMENT;
-      const staySinceMs = snapshot.type === 'location' && isStationaryMovement(remoteMovement) ? observedStaySince([
-        ...(locationHistory[deviceId] ?? []),
-        { latitude: snapshot.latitude, longitude: snapshot.longitude, recordedAt: snapshot.recordedAt },
-      ]) : null;
-      return {
-      id: deviceId,
-      name: remoteName,
-      initials: typeof remoteProfile?.name === 'string' && remoteProfile.name.trim() ? initialsForName(remoteProfile.name) : `M${index + 1}`,
-      avatar: avatarForProfile({ avatar: remoteProfile?.avatar }),
-      battery: snapshot.profile?.battery,
-      home: remoteHome,
-      role: 'Circle member',
-      status: snapshot.type === 'paused' ? 'Sharing paused' : now - Date.parse(snapshot.recordedAt) > STALE_AFTER_MS ? 'Location stale' : 'Location shared',
-      lastSeen: ageLabel(snapshot.recordedAt, now),
-      coordinate: snapshot.type === 'location' && isValidCoordinate({ latitude: snapshot.latitude, longitude: snapshot.longitude }) ? { latitude: snapshot.latitude, longitude: snapshot.longitude } : null,
-      movement: remoteMovement,
-      staySinceMs,
-      color: AVATAR_COLORS[index % AVATAR_COLORS.length],
-      isPaused: snapshot.type === 'paused',
-      isStale: snapshot.type === 'location' && now - Date.parse(snapshot.recordedAt) > STALE_AFTER_MS,
-      historyCount: locationHistory[deviceId]?.length ?? 0,
-    };});
-    return [localMember, ...remoteMembers];
-  }, [circle, currentCoordinate, currentMovement, locationEnabled, remoteSnapshots, now, profile, locationHistory]);
-
-  const trailMember = useMemo(() => (trailMemberId ? mapMembers.find((member) => member.id === trailMemberId) ?? null : null), [mapMembers, trailMemberId]);
-  const trailCoordinates = useMemo(() => {
-    if (!circle || !trailMemberId) return [];
-    const deviceId = trailMemberId === 'you' ? circle.deviceId : trailMemberId;
-    return (locationHistory[deviceId] ?? []).map((point) => ({ latitude: point.latitude, longitude: point.longitude }));
-  }, [circle, trailMemberId, locationHistory]);
-
-  const showTrail = (member: Member) => {
-    setSelectedMember(null);
-    setTrailMemberId(member.id);
-    void refreshCircleData();
-  };
-
-  const requestLocation = async () => {
-    if (!circleRef.current) { router.push('/create-circle'); return; }
-    if (Platform.OS === 'web') {
-      setToast('Location sharing is available in the mobile app.');
-      return;
-    }
-    try {
-      const foreground = await Location.requestForegroundPermissionsAsync();
-      if (foreground.status !== 'granted') {
-        setToast('Location permission is needed to share your location.');
-        return;
-      }
-
-      // Motion access is optional: location sharing works even when it is denied.
-      await Location.requestMotionActivityPermissionsAsync().catch(() => null);
-      const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      shareLocation(current);
-      if (!watcher.current) {
-        watcher.current = await Location.watchPositionAsync({ accuracy: Location.Accuracy.High, distanceInterval: 0, timeInterval: 5000 }, shareLocation);
-      }
-
-      let backgroundStarted = false;
-      try {
-        let background = await Location.getBackgroundPermissionsAsync();
-        if (!background.granted) {
-          const proceed = Platform.OS !== 'android' || await new Promise<boolean>(resolve => {
-            Alert.alert('Allow background location', 'Free360 needs background location to share with your circle and detect home arrivals while the app is closed. On the next screen, choose Allow all the time for Free360.', [
-              { text: 'While open only', style: 'cancel', onPress: () => resolve(false) },
-              { text: 'Continue', onPress: () => resolve(true) },
-            ], { cancelable: true, onDismiss: () => resolve(false) });
-          });
-          if (proceed) background = await Location.requestBackgroundPermissionsAsync();
-        }
-        if (background.status === 'granted') {
-          if (!await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK)) await Location.startLocationUpdatesAsync(BACKGROUND_LOCATION_TASK, { accuracy: Location.Accuracy.High, distanceInterval: 0, timeInterval: 30000, pausesUpdatesAutomatically: false, showsBackgroundLocationIndicator: true, foregroundService: { notificationTitle: 'Free360 location sharing', notificationBody: 'Your circle can see your location.', notificationColor: COLORS.coral } });
-          backgroundStarted = true;
-          setBackgroundReady(true);
-        } else {
-          setBackgroundReady(false);
-        }
-      } catch {
+        watcher.current?.remove();
+        watcher.current = null;
+        resetLocationMovement();
+        lastSharedTimestamp.current = 0;
+        setCurrentMovement(null);
+        setLocationEnabled(false);
         setBackgroundReady(false);
-      }
-      setLocationEnabled(true);
-      setToast(backgroundStarted ? 'Location sharing is on, including background updates.' : 'Sharing while open. Enable Allow all the time in Free360 location settings for background updates.');
-    } catch {
-      setToast('We couldn’t access your location. Check device permissions.');
-    }
-  };
+        if (circleRef.current) {
+            try {
+                await publishPaused(circleRef.current);
+                setToast("Location sharing is paused.");
+            } catch {
+                setToast(
+                    "Sharing stopped on this device. Paused status will sync when the connection returns.",
+                );
+            }
+        }
+    };
 
-  const stopLocation = async () => {
-    try {
-      if (await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK)) await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
-    } catch (error) {
-      if (backgroundReady) {
-        console.warn('[Free360] Could not stop background sharing:', error);
-        setToast('Could not stop background sharing. Check device settings and try again.');
-        return;
-      }
-    }
-    watcher.current?.remove();
-    watcher.current = null;
-    resetLocationMovement();
-    lastSharedTimestamp.current = 0;
-    setCurrentMovement(null);
-    setLocationEnabled(false);
-    setBackgroundReady(false);
-    if (circleRef.current) {
-      try {
-        await publishPaused(circleRef.current);
-        setToast('Location sharing is paused.');
-      } catch {
-        setToast('Sharing stopped on this device. Paused status will sync when the connection returns.');
-      }
-    }
-  };
+    const toggleLocation = () => {
+        if (locationEnabled) void stopLocation();
+        else void requestLocation();
+    };
+    const invite = () => {
+        if (!circle) {
+            router.push("/create-circle");
+            return;
+        }
+        if (!circle.isOwner) {
+            setToast(
+                "Only the phone that created this circle can make invitations.",
+            );
+            return;
+        }
+        router.push("/invite");
+    };
+    const checkIn = async (message: string) => {
+        if (!circle) {
+            setCheckInVisible(false);
+            router.push("/create-circle");
+            return;
+        }
+        try {
+            const payload = await publishCheckIn(circle, message);
+            setCheckIns((current) =>
+                [{ deviceId: circle.deviceId, payload }, ...current].slice(
+                    0,
+                    100,
+                ),
+            );
+            setCheckInVisible(false);
+            setToast("Check-in sent to your circle.");
+        } catch {
+            setToast(
+                "Check-in not sent. Reconnect to your group project and try again.",
+            );
+        }
+    };
 
-  const toggleLocation = () => { if (locationEnabled) void stopLocation(); else void requestLocation(); };
-  const invite = () => {
-    if (!circle) {
-      router.push('/create-circle');
-      return;
-    }
-    if (!circle.isOwner) {
-      setToast('Only the phone that created this circle can make invitations.');
-      return;
-    }
-    router.push('/invite');
-  };
-  const checkIn = async (message: string) => {
-    if (!circle) { setCheckInVisible(false); router.push('/create-circle'); return; }
-    try {
-      const payload = await publishCheckIn(circle, message);
-      setCheckIns((current) => [{ deviceId: circle.deviceId, payload }, ...current].slice(0, 100));
-      setCheckInVisible(false);
-      setToast('Check-in sent to your circle.');
-    } catch {
-      setToast('Check-in not sent. Reconnect to your group project and try again.');
-    }
-  };
+    const liveSelectedMember = selectedMember
+        ? (mapMembers.find((member) => member.id === selectedMember.id) ??
+          selectedMember)
+        : null;
+    // Already-loaded trail for the selected member only: same id→deviceId mapping
+    // as the map trail (self 'you' lives under circle.deviceId). No new fetching.
+    const selectedHistory =
+        liveSelectedMember && circle
+            ? (locationHistory[
+                  liveSelectedMember.id === "you"
+                      ? circle.deviceId
+                      : liveSelectedMember.id
+              ] ?? [])
+            : [];
+    const content = (() => {
+        const selfName = displayNameFor(profile.name, SELF_FALLBACK_NAME);
+        const selfHeaderMember: Member = mapMembers.find(
+            (member) => member.isYou,
+        ) ?? {
+            id: "you",
+            name: selfName,
+            initials: initialsForName(selfName),
+            avatar: avatarForProfile(profile as { avatar?: unknown }),
+            role: "You",
+            status: "Sharing paused",
+            lastSeen: "No location yet",
+            coordinate: null,
+            color: COLORS.deepPurple,
+            isYou: true,
+            historyCount: 0,
+        };
+        // Map tab hosts the member sheet in place (non-modal) so the map stays
+        // interactive: refresh reuses the existing snapshot read
+        // (refreshCircleData) and never publishes the member's position.
+        if (activeTab === "map")
+            return (
+                <MapScreen
+                    currentCoordinate={currentCoordinate}
+                    locationEnabled={locationEnabled}
+                    circleName={circle?.circleName ?? ""}
+                    circleMembers={mapMembers}
+                    circleConnected={circleConnected}
+                    selfHome={profile.home}
+                    trailMember={trailMember}
+                    trailCoordinates={trailCoordinates}
+                    selfStaySince={selfStaySince}
+                    selfAddress={selfAddress}
+                    nowMs={now}
+                    selectedMember={liveSelectedMember}
+                    selectedHistory={selectedHistory}
+                    isOwner={Boolean(circle?.isOwner)}
+                    onRequestLocation={requestLocation}
+                    onCheckIn={() => setCheckInVisible(true)}
+                    onOpenMember={setSelectedMember}
+                    onOpenCircle={() => router.replace("/circle")}
+                    onOpenSettings={() => router.replace("/you")}
+                    onInvite={invite}
+                    onCreateCircle={() => router.push("/create-circle")}
+                    onJoinCircle={() => router.push("/join")}
+                    onHideTrail={() => setTrailMemberId(null)}
+                    onCloseMember={() => setSelectedMember(null)}
+                    onRefreshMember={() => {
+                        void refreshCircleData();
+                    }}
+                    onShowTrail={showTrail}
+                />
+            );
+        if (activeTab === "circle")
+            return (
+                <CircleScreen
+                    circleMembers={mapMembers}
+                    circle={circle}
+                    onInvite={invite}
+                    onCreateCircle={() => router.push("/create-circle")}
+                    onJoin={() => router.push("/join")}
+                    onOpenMember={setSelectedMember}
+                />
+            );
+        if (activeTab === "activity")
+            return (
+                <ActivityScreen
+                    circle={circle}
+                    checkIns={checkIns}
+                    onCheckIn={() => setCheckInVisible(true)}
+                />
+            );
+        return (
+            <YouScreen
+                name={selfHeaderMember.name}
+                avatar={selfHeaderMember.avatar ?? null}
+                locationEnabled={locationEnabled}
+                locationReady={locationReady}
+                backgroundReady={backgroundReady}
+                circleConnected={circleConnected}
+                onToggleLocation={toggleLocation}
+                circle={circle}
+                onCircleSetup={() =>
+                    router.push(circle ? "/circle" : "/create-circle")
+                }
+                onInvite={invite}
+                onJoin={() => router.push("/join")}
+            />
+        );
+    })();
 
-  const liveSelectedMember = selectedMember ? mapMembers.find((member) => member.id === selectedMember.id) ?? selectedMember : null;
-  // Already-loaded trail for the selected member only: same id→deviceId mapping
-  // as the map trail (self 'you' lives under circle.deviceId). No new fetching.
-  const selectedHistory = liveSelectedMember && circle ? (locationHistory[liveSelectedMember.id === 'you' ? circle.deviceId : liveSelectedMember.id] ?? []) : [];
-  const content = (() => {
-    const selfName = displayNameFor(profile.name, SELF_FALLBACK_NAME);
-    const selfHeaderMember: Member = mapMembers.find((member) => member.isYou) ?? { id: 'you', name: selfName, initials: initialsForName(selfName), avatar: avatarForProfile(profile as { avatar?: unknown }), role: 'You', status: 'Sharing paused', lastSeen: 'No location yet', coordinate: null, color: COLORS.deepPurple, isYou: true, historyCount: 0 };
-    // Map tab hosts the member sheet in place (non-modal) so the map stays
-    // interactive: refresh reuses the existing snapshot read
-    // (refreshCircleData) and never publishes the member's position.
-    if (activeTab === 'map') return <MapScreen currentCoordinate={currentCoordinate} locationEnabled={locationEnabled} circleName={circle?.circleName ?? ''} circleMembers={mapMembers} circleConnected={circleConnected} selfHome={profile.home} trailMember={trailMember} trailCoordinates={trailCoordinates} selfStaySince={selfStaySince} selfAddress={selfAddress} nowMs={now} selectedMember={liveSelectedMember} selectedHistory={selectedHistory} isOwner={Boolean(circle?.isOwner)} onRequestLocation={requestLocation} onCheckIn={() => setCheckInVisible(true)} onOpenMember={setSelectedMember} onOpenCircle={() => router.replace('/circle')} onOpenSettings={() => router.replace('/you')} onInvite={invite} onCreateCircle={() => router.push('/create-circle')} onJoinCircle={() => router.push('/join')} onHideTrail={() => setTrailMemberId(null)} onCloseMember={() => setSelectedMember(null)} onRefreshMember={() => { void refreshCircleData(); }} onShowTrail={showTrail} />;
-    if (activeTab === 'circle') return <CircleScreen circleMembers={mapMembers} circle={circle} onInvite={invite} onCreateCircle={() => router.push('/create-circle')} onJoin={() => router.push('/join')} onOpenMember={setSelectedMember} />;
-    if (activeTab === 'activity') return <ActivityScreen circle={circle} checkIns={checkIns} onCheckIn={() => setCheckInVisible(true)} />;
-    return <YouScreen name={selfHeaderMember.name} avatar={selfHeaderMember.avatar ?? null} locationEnabled={locationEnabled} locationReady={locationReady} backgroundReady={backgroundReady} circleConnected={circleConnected} onToggleLocation={toggleLocation} circle={circle} onCircleSetup={() => router.push(circle ? '/circle' : '/create-circle')} onInvite={invite} onJoin={() => router.push('/join')} />;
-  })();
-
-  const headerSelfName = displayNameFor(profile.name, SELF_FALLBACK_NAME);
-  const headerSelf: Member = mapMembers.find((member) => member.isYou) ?? { id: 'you', name: headerSelfName, initials: initialsForName(headerSelfName), avatar: avatarForProfile(profile as { avatar?: unknown }), role: 'You', status: 'Sharing paused', lastSeen: 'No location yet', coordinate: null, color: COLORS.deepPurple, isYou: true, historyCount: 0 };
-  return <SafeAreaView edges={activeTab === 'map' ? ['bottom', 'left', 'right'] : undefined} style={[styles.appRoot, activeTab === 'map' && styles.mapAppRoot]}><StatusBar style="dark" />{activeTab !== 'map' && <Header circleName={circle?.circleName ?? 'No circle'} selfMember={headerSelf} onSettings={() => router.replace('/you')} />}<View style={styles.mainContent}>{content}</View><BottomTabs activeTab={activeTab} onTabChange={(tab) => router.replace(`/${tab}`)} />{Boolean(toast) && <View style={styles.toast}><Icon name="information-circle" size={18} color={COLORS.white} /><Text style={styles.toastText}>{toast}</Text></View>}<CheckInModal visible={checkInVisible} onClose={() => setCheckInVisible(false)} onConfirm={checkIn} />{activeTab !== 'map' && <MemberModal member={liveSelectedMember} history={selectedHistory} onShowTrail={showTrail} onClose={() => setSelectedMember(null)} />}</SafeAreaView>;
+    const headerSelfName = displayNameFor(profile.name, SELF_FALLBACK_NAME);
+    const headerSelf: Member = mapMembers.find((member) => member.isYou) ?? {
+        id: "you",
+        name: headerSelfName,
+        initials: initialsForName(headerSelfName),
+        avatar: avatarForProfile(profile as { avatar?: unknown }),
+        role: "You",
+        status: "Sharing paused",
+        lastSeen: "No location yet",
+        coordinate: null,
+        color: COLORS.deepPurple,
+        isYou: true,
+        historyCount: 0,
+    };
+    return (
+        <SafeAreaView
+            edges={
+                activeTab === "map" ? ["bottom", "left", "right"] : undefined
+            }
+            style={[styles.appRoot, activeTab === "map" && styles.mapAppRoot]}
+        >
+            <StatusBar style="dark" />
+            {activeTab !== "map" && (
+                <Header
+                    circleName={circle?.circleName ?? "No circle"}
+                    selfMember={headerSelf}
+                    onSettings={() => router.replace("/you")}
+                />
+            )}
+            <View style={styles.mainContent}>{content}</View>
+            <BottomTabs
+                activeTab={activeTab}
+                onTabChange={(tab) => router.replace(`/${tab}`)}
+            />
+            {Boolean(toast) && (
+                <View style={styles.toast}>
+                    <Icon
+                        name="information-circle"
+                        size={18}
+                        color={COLORS.white}
+                    />
+                    <Text style={styles.toastText}>{toast}</Text>
+                </View>
+            )}
+            <CheckInModal
+                visible={checkInVisible}
+                onClose={() => setCheckInVisible(false)}
+                onConfirm={checkIn}
+            />
+            {activeTab !== "map" && (
+                <MemberModal
+                    member={liveSelectedMember}
+                    history={selectedHistory}
+                    onShowTrail={showTrail}
+                    onClose={() => setSelectedMember(null)}
+                />
+            )}
+        </SafeAreaView>
+    );
 }
 
 const styles = StyleSheet.create({
-  appRoot: { flex: 1, backgroundColor: COLORS.canvas },
-  mapAppRoot: { backgroundColor: COLORS.mapLand },
-  emptyNote: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 12, lineHeight: 18, marginBottom: 18 },
-  mainContent: { flex: 1 },
-  header: { height: 80, backgroundColor: COLORS.white, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 24 },
-  brandMark: { width: 40, height: 40, borderRadius: RADII.card, backgroundColor: COLORS.purple, alignItems: 'center', justifyContent: 'center' },
-  brandCopy: { marginLeft: 10, flex: 1 },
-  brandName: { fontFamily: FONTS.heavy, fontSize: 19, fontWeight: 'normal', color: COLORS.ink, letterSpacing: -0.4 },
-  brandSubline: { fontFamily: FONTS.bold, color: COLORS.subtle, fontWeight: 'normal', fontSize: 8.5, letterSpacing: 1.5, marginTop: 3 },
-  headerAvatarButton: { borderRadius: RADII.card, minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
-  contentScreen: { flex: 1, backgroundColor: COLORS.canvas },
-  contentContainer: { padding: 20, paddingBottom: 34 },
-  sectionTitleRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 14, marginTop: 8 },
-  eyebrow: { fontFamily: FONTS.heavy, fontSize: 10, color: COLORS.subtle, fontWeight: 'normal', letterSpacing: 1.4, marginBottom: 5 },
-  sectionTitle: { fontFamily: FONTS.heavy, color: COLORS.ink, fontSize: 25, lineHeight: 29, fontWeight: 'normal', letterSpacing: -0.6 },
-  actionText: { fontFamily: FONTS.bold, color: COLORS.purple, fontWeight: 'normal', fontSize: 14, minHeight: 48, textAlignVertical: 'center', paddingTop: 12 },
-  avatar: { alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: COLORS.white, position: 'relative' },
-  avatarText: { fontFamily: FONTS.heavy, color: COLORS.white, fontWeight: 'normal', letterSpacing: -0.5 },
-  onlineDot: { position: 'absolute', right: -1, bottom: 0, width: 12, height: 12, backgroundColor: COLORS.mint, borderRadius: 6, borderWidth: 2, borderColor: COLORS.white },
-  mapScreen: { flex: 1, overflow: 'hidden', backgroundColor: COLORS.mapLand },
-  mapNoLocation: { position: 'absolute', top: '30%', left: 30, right: 30, alignItems: 'center', gap: 10 },
-  mapNoLocationText: { fontFamily: FONTS.bold, color: COLORS.deepPurple, fontSize: 15, fontWeight: 'normal', textAlign: 'center' },
-  mapEmptyOverlay: { position: 'absolute', top: 132, left: 16, right: 70, backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: RADII.card, paddingVertical: 8, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 8, ...SHADOWS.floating },
-  mapEmptyOverlayText: { fontFamily: FONTS.bold, color: COLORS.deepPurple, fontSize: 11, fontWeight: 'normal', flex: 1 },
-  mapTopBar: { minHeight: 40, position: 'absolute', top: 12, left: 18, right: 18, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  mapRoundButton: { width: 36, height: 36, borderRadius: RADII.pill, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', ...SHADOWS.floating },
-  mapTopSpacer: { width: 36 },
-  mapCirclePicker: { flex: 1, maxWidth: 230, minHeight: 36, borderRadius: RADII.pill, backgroundColor: COLORS.white, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, ...SHADOWS.floating },
-  mapCirclePickerText: { fontFamily: FONTS.regular, flex: 1, textAlign: 'left', textAlignVertical: 'center', includeFontPadding: false, color: COLORS.deepPurple, fontSize: 15, fontWeight: 'normal' },
-  mapTopOverlay: { position: 'absolute', top: 73, left: 16, right: 70, gap: 8 },
-  safePill: { alignSelf: 'flex-start', maxWidth: '100%', backgroundColor: COLORS.white, borderRadius: RADII.pill, paddingVertical: 6, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', ...SHADOWS.floating },
-  safeIcon: { width: 25, height: 25, borderRadius: 11, alignItems: 'center', justifyContent: 'center', marginRight: 8 },
-  safePillLabel: { fontFamily: FONTS.heavy, color: COLORS.deepPurple, fontWeight: 'normal', fontSize: 10, letterSpacing: 0.8 },
-  safePillValue: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 10, marginTop: 2 },
-  locationPrompt: { minHeight: 48, backgroundColor: COLORS.white, borderRadius: RADII.pill, paddingHorizontal: 10, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', ...SHADOWS.floating },
-  trailPill: { minHeight: 48, alignSelf: 'flex-start', maxWidth: '100%', backgroundColor: COLORS.ink, borderRadius: RADII.pill, paddingVertical: 8, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 7, ...SHADOWS.floating },
-  trailPillText: { fontFamily: FONTS.heavy, color: COLORS.white, fontWeight: 'normal', fontSize: 11, flexShrink: 1 },
-  trailStartDot: { width: 14, height: 14, borderRadius: 7, borderWidth: 3, borderColor: COLORS.white },
-  locationPromptText: { fontFamily: FONTS.bold, flex: 1, marginLeft: 8, color: COLORS.deepPurple, fontWeight: 'normal', fontSize: 12 },
-  mapControls: { position: 'absolute', right: 16, bottom: 362 },
-  mapControlButton: { width: 52, height: 52, borderRadius: RADII.pill, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', ...SHADOWS.floating },
-  mapMarker: { width: 66, height: 66, borderRadius: 22, alignItems: 'center', justifyContent: 'center', borderWidth: 4, borderColor: COLORS.white, ...SHADOWS.floating },
-  mapMarkerRow: { width: 184, height: 86, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  mapAvatarColumn: { width: 66, alignItems: 'center' },
-  mapBattery: { fontFamily: FONTS.regular, height: 16, paddingHorizontal: 5, borderRadius: 5, backgroundColor: COLORS.white, color: COLORS.ink, fontSize: 11, textAlign: 'center' },
-  mapMovementBadge: { width: 108, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: COLORS.white, borderRadius: RADII.card, paddingVertical: 7, borderColor: COLORS.border },
-  mapSpeedText: { fontFamily: FONTS.bold, color: COLORS.ink, fontSize: 12, fontWeight: 'normal', fontVariant: ['tabular-nums'] },
-  mapMarkerStale: { opacity: 0.52 },
-  mapMarkerText: { fontFamily: FONTS.heavy, color: COLORS.white, fontSize: 23, fontWeight: 'normal', letterSpacing: -0.5 },
-  mapAttribution: { position: 'absolute', bottom: 346, left: 7, backgroundColor: 'rgba(255,255,255,0.85)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
-  attributionText: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 8 },
-  mapActions: { position: 'absolute', bottom: 300, left: 16, right: 16, flexDirection: 'row', gap: 10 },
-  mapActionButton: { flex: 1, minHeight: 52, borderRadius: RADII.pill, backgroundColor: COLORS.white, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 12, ...SHADOWS.floating },
-  mapActionText: { fontFamily: FONTS.heavy, color: COLORS.purple, fontSize: 13, fontWeight: 'normal' },
-  mapBottomCard: { position: 'absolute', left: 18, right: 18, bottom: 0, backgroundColor: '#FAF9FC', borderTopLeftRadius: 34, borderTopRightRadius: 34, paddingHorizontal: 18, paddingBottom: 8, ...SHADOWS.sheet },
-  cardHandleHit: { height: 44, marginHorizontal: -18 },
-  cardHandleButton: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  cardHandle: { width: 34, height: 4, borderRadius: RADII.pill, backgroundColor: '#CCCACF' },
-  mapBottomHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
-  mapBottomHeaderCopy: { flex: 1 },
-  mapBottomTitle: { fontFamily: FONTS.heavy, color: COLORS.ink, fontSize: 22, fontWeight: 'normal', letterSpacing: -0.6 },
-  mapBottomSubtitle: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 12, marginTop: 2 },
-  mapPanelArrow: { width: 48, height: 48, borderRadius: RADII.pill, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', ...SHADOWS.card },
-  mapMemberScroll: { flex: 1, borderRadius: 26, backgroundColor: COLORS.white, borderWidth: 1, borderColor: '#DEDAE3', ...SHADOWS.card },
-  mapMemberList: { paddingHorizontal: 18, paddingVertical: 8, flexGrow: 1 },
-  mapMemberRow: { minHeight: 96, paddingVertical: 12, flexDirection: 'row', alignItems: 'center' },
-  mapMemberCopy: { flex: 1, marginLeft: 13 },
-  mapMemberName: { fontFamily: FONTS.bold, color: COLORS.ink, fontSize: 18, fontWeight: 'normal' },
-  mapMemberStatus: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 14, marginTop: 2 },
-  mapFilterEmpty: { flex: 1, minHeight: 100, alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 14 },
-  mapPlaceIcon: { width: 64, height: 64, backgroundColor: COLORS.purpleSoft, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  mapEmptySettings: { alignItems: 'center' },
-  mapPanelActions: { flexDirection: 'row', justifyContent: 'space-around', paddingTop: 4 },
-  mapPanelAction: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 8 },
-  mapPanelActionText: { fontFamily: FONTS.medium, fontSize: 11, color: COLORS.purple },
-  mapEmptyCard: { backgroundColor: COLORS.white, borderRadius: RADII.card, minHeight: 104, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', gap: 12, ...SHADOWS.card },
-  mapEmptyCopy: { flex: 1 },
-  mapEmptyTitle: { fontFamily: FONTS.heavy, color: COLORS.deepPurple, fontSize: 14, fontWeight: 'normal' },
-  mapEmptyText: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 11, marginTop: 4 },
-  circleHero: { backgroundColor: COLORS.ink, borderRadius: RADII.card, padding: 18, flexDirection: 'row', alignItems: 'center', marginBottom: 26, ...SHADOWS.card },
-  circleHeroOrb: { width: 52, height: 52, borderRadius: RADII.card, backgroundColor: COLORS.coral, alignItems: 'center', justifyContent: 'center' },
-  circleHeroCopy: { flex: 1, paddingLeft: 13, paddingRight: 8 },
-  circleHeroTitle: { fontFamily: FONTS.heavy, color: COLORS.white, fontWeight: 'normal', fontSize: 16, marginBottom: 4 },
-  circleHeroBody: { fontFamily: FONTS.regular, color: COLORS.purpleSoft, fontSize: 11.5, lineHeight: 17 },
-  circleInviteSmall: { width: 48, height: 48, borderRadius: RADII.pill, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center' },
-  memberList: { backgroundColor: COLORS.white, borderRadius: RADII.card, paddingHorizontal: 18, paddingVertical: 8, marginBottom: 16, ...SHADOWS.card },
-  memberRow: { minHeight: 88, flexDirection: 'row', alignItems: 'center' },
-  memberRowLast: { borderBottomWidth: 0 },
-  memberCopy: { flex: 1, marginLeft: 12 },
-  memberNameRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  memberName: { fontFamily: FONTS.heavy, color: COLORS.ink, fontWeight: 'normal', fontSize: 14 },
-  youLabel: { fontFamily: FONTS.heavy, color: COLORS.coral, fontSize: 8, letterSpacing: 0.7, fontWeight: 'normal' },
-  memberStatus: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 11.5, marginTop: 5 },
-  memberTrailing: { alignItems: 'flex-end', gap: 7 },
-  inviteButton: { height: 54, borderRadius: RADII.pill, backgroundColor: COLORS.coralSoft, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, marginBottom: 19, gap: 9, ...SHADOWS.card },
-  inviteButtonText: { fontFamily: FONTS.heavy, flex: 1, color: COLORS.coral, fontWeight: 'normal', fontSize: 13 },
-  timelineLabel: { fontFamily: FONTS.heavy, color: COLORS.subtle, fontSize: 10, fontWeight: 'normal', letterSpacing: 1.3, marginBottom: 13 },
-  timeline: { backgroundColor: COLORS.white, borderRadius: RADII.card, padding: 17, marginBottom: 13, ...SHADOWS.card },
-  timelineItem: { flexDirection: 'row', minHeight: 76 },
-  timelineRail: { width: 36, alignItems: 'center' },
-  timelineIcon: { width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center', zIndex: 1 },
-  timelineLine: { position: 'absolute', top: 34, bottom: -2, width: 1, backgroundColor: COLORS.border },
-  timelineCopy: { flex: 1, marginLeft: 10 },
-  timelineTime: { fontFamily: FONTS.bold, color: COLORS.subtle, fontSize: 10, fontWeight: 'normal' },
-  timelineTitle: { fontFamily: FONTS.heavy, color: COLORS.ink, fontWeight: 'normal', fontSize: 13, marginTop: 3 },
-  timelineBody: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 11, marginTop: 4 },
-  fullWidthAction: { height: 53, backgroundColor: COLORS.white, borderRadius: RADII.pill, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, gap: 9, ...SHADOWS.card },
-  fullWidthActionText: { fontFamily: FONTS.heavy, flex: 1, color: COLORS.ink, fontWeight: 'normal', fontSize: 12.5 },
-  profileCard: { backgroundColor: COLORS.white, borderRadius: RADII.card, padding: 16, flexDirection: 'row', alignItems: 'center', marginBottom: 20, ...SHADOWS.card },
-  profileCopy: { flex: 1, marginLeft: 13 },
-  profileName: { fontFamily: FONTS.heavy, color: COLORS.ink, fontWeight: 'normal', fontSize: 17 },
-  profileEmail: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 11, marginTop: 4 },
-  profileStatus: { flexDirection: 'row', alignItems: 'center', marginTop: 9, gap: 5 },
-  profileStatusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.mint },
-  profileStatusText: { fontFamily: FONTS.bold, color: COLORS.mint, fontSize: 10, fontWeight: 'normal' },
-  profileStatusInactive: { backgroundColor: COLORS.subtle },
-  profileStatusTextInactive: { color: COLORS.muted },
-  settingsCard: { backgroundColor: COLORS.white, borderRadius: RADII.card, paddingHorizontal: 15, marginBottom: 20, ...SHADOWS.card },
-  settingRow: { minHeight: 72, flexDirection: 'row', alignItems: 'center' },
-  settingIcon: { width: 39, height: 39, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  settingCopy: { flex: 1, marginLeft: 11, paddingRight: 10 },
-  settingTitle: { fontFamily: FONTS.heavy, color: COLORS.ink, fontWeight: 'normal', fontSize: 13 },
-  settingDescription: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 10.5, marginTop: 4, lineHeight: 15 },
-  settingsDivider: { height: 1, backgroundColor: COLORS.border, marginLeft: 50 },
-  statusCheck: { width: 28, height: 28, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  privacyNote: { flexDirection: 'row', backgroundColor: COLORS.purpleSoft, borderRadius: RADII.card, padding: 13, marginBottom: 16, gap: 8 },
-  privacyText: { fontFamily: FONTS.regular, flex: 1, color: COLORS.muted, fontSize: 10.5, lineHeight: 15 },
-  versionText: { fontFamily: FONTS.regular, color: COLORS.subtle, fontSize: 10, textAlign: 'center', marginTop: 1 },
-  bottomTabs: { minHeight: 80, backgroundColor: COLORS.white, flexDirection: 'row', paddingHorizontal: 8, paddingTop: 10, paddingBottom: 8 },
-  tabButton: { flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center', gap: 4 },
-  tabIconWrap: { width: 48, height: 32, borderRadius: RADII.pill, alignItems: 'center', justifyContent: 'center' },
-  tabIconWrapActive: { backgroundColor: COLORS.white },
-  tabLabel: { fontFamily: FONTS.bold, color: COLORS.muted, fontSize: 11, fontWeight: 'normal' },
-  tabLabelActive: { color: COLORS.purple },
-  toast: { position: 'absolute', bottom: 88, left: 18, right: 18, borderRadius: RADII.card, paddingVertical: 12, paddingHorizontal: 14, backgroundColor: COLORS.ink, flexDirection: 'row', alignItems: 'center', gap: 8, ...SHADOWS.floating },
-  toastText: { fontFamily: FONTS.bold, color: COLORS.white, flex: 1, fontSize: 12, fontWeight: 'normal', lineHeight: 17 },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(11, 23, 42, 0.35)', justifyContent: 'flex-end' },
-  modalDismissArea: { flex: 1 },
-  checkInSheet: { backgroundColor: COLORS.canvas, borderRadius: RADII.sheet, marginHorizontal: 12, marginBottom: 12, paddingHorizontal: 24, paddingTop: 12, paddingBottom: 28, ...SHADOWS.sheet },
-  sheetHandle: { width: 38, height: 4, borderRadius: 2, backgroundColor: COLORS.handle, alignSelf: 'center', marginBottom: 20 },
-  sheetIcon: { width: 62, height: 62, borderRadius: RADII.card, backgroundColor: COLORS.mintSoft, alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: 12 },
-  sheetTitle: { fontFamily: FONTS.heavy, color: COLORS.ink, fontSize: 22, fontWeight: 'normal', textAlign: 'center', letterSpacing: -0.5 },
-  sheetBody: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 12, lineHeight: 18, textAlign: 'center', marginTop: 8, marginHorizontal: 14 },
-  messageInput: { fontFamily: FONTS.regular, minHeight: 80, backgroundColor: COLORS.white, borderRadius: RADII.card, padding: 16, color: COLORS.ink, fontSize: 14, marginTop: 18, textAlignVertical: 'top' },
-  confirmCheckIn: { height: 50, backgroundColor: COLORS.coral, borderRadius: RADII.pill, marginTop: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 },
-  confirmCheckInText: { fontFamily: FONTS.heavy, color: COLORS.white, fontWeight: 'normal', fontSize: 13 },
-  cancelButton: { minHeight: 48, alignItems: 'center', justifyContent: 'center', paddingVertical: 14 },
-  cancelButtonText: { fontFamily: FONTS.bold, color: COLORS.muted, fontWeight: 'normal', fontSize: 12 },
-  memberSheet: { backgroundColor: COLORS.white, borderTopLeftRadius: RADII.sheetLarge, borderTopRightRadius: RADII.sheetLarge, marginHorizontal: 0, marginBottom: 0, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 20, maxHeight: '88%', ...SHADOWS.sheet },
-  memberSheetHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: COLORS.handle, alignSelf: 'center', marginTop: 4, marginBottom: 10 },
-  memberTopBar: { backgroundColor: COLORS.white, flexDirection: 'row', alignItems: 'center', paddingVertical: 6, marginBottom: 0 },
-  memberBackButton: { width: 48, height: 48, borderRadius: RADII.pill, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', ...SHADOWS.card },
-  memberTopBarCopy: { flex: 1, marginHorizontal: 8, alignItems: 'center' },
-  memberTopBarName: { fontFamily: FONTS.regular, color: COLORS.ink, fontSize: 15, textAlign: 'center' },
-  memberTopBarSubtitle: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 11, marginTop: 2, textAlign: 'center' },
-  memberTopBarSpacer: { width: 48 },
-  mapMemberHeader: { position: 'absolute', left: 16, right: 16, minHeight: 56, backgroundColor: COLORS.white, borderRadius: RADII.pill, paddingVertical: 6, paddingLeft: 6, paddingRight: 6, flexDirection: 'row', alignItems: 'center', gap: 10, ...SHADOWS.floating, zIndex: 10 },
-  mapMemberBack: { width: 44, height: 44, borderRadius: RADII.pill, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', ...SHADOWS.card },
-  mapMemberHeaderCopy: { flex: 1, marginHorizontal: 2, justifyContent: 'center' },
-  mapMemberHeaderName: { fontFamily: FONTS.regular, color: COLORS.ink, fontSize: 15 },
-  mapMemberHeaderSubtitle: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 11, marginTop: 2 },
-  mapMemberRefresh: { width: 44, height: 44, borderRadius: RADII.pill, backgroundColor: COLORS.purple, alignItems: 'center', justifyContent: 'center', ...SHADOWS.card },
-  mapMemberSheet: { position: 'absolute', left: 12, right: 12, bottom: 0, backgroundColor: COLORS.white, borderTopLeftRadius: RADII.sheetLarge, borderTopRightRadius: RADII.sheetLarge, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 20, maxHeight: '52%', ...SHADOWS.sheet, zIndex: 10 },
-  mapMemberSheetBase: { position: 'absolute', bottom: 0, backgroundColor: COLORS.white, paddingHorizontal: 20, paddingTop: 8, paddingBottom: 20, ...SHADOWS.sheet, zIndex: 10 },
-  mapMemberHandleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 2 },
-  mapMemberHandleHit: { flex: 1, height: 48, alignItems: 'center', justifyContent: 'center' },
-  mapMemberHandleBar: { width: 40, height: 4, borderRadius: 2, backgroundColor: COLORS.handle },
-  mapMemberToggle: { width: 44, height: 44, borderRadius: RADII.pill, alignItems: 'center', justifyContent: 'center' },
-  memberAvatarOverlap: { alignItems: 'center', marginTop: -6, marginBottom: 10 },
-  memberAvatarRing: { borderRadius: RADII.pill, borderWidth: 4, borderColor: COLORS.white, ...SHADOWS.floating },
-  memberSheetScroll: { flexGrow: 0, flexShrink: 1 },
-  memberSheetScrollContent: { paddingBottom: 12 },
-  memberSheetName: { fontFamily: FONTS.heavy, color: COLORS.ink, fontSize: 24, letterSpacing: -0.6, flexShrink: 1 },
-  memberDetailNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, marginRight: 10 },
-  memberOnlineDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: COLORS.online, borderWidth: 2, borderColor: COLORS.white },
-  memberOnlineDotOff: { backgroundColor: COLORS.subtle },
-  memberBatteryPill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: COLORS.white, borderWidth: 1, borderColor: '#E4E0EC', borderRadius: RADII.pill, paddingVertical: 7, paddingHorizontal: 12, ...SHADOWS.card },
-  memberBatteryText: { fontFamily: FONTS.bold, color: COLORS.deepPurple, fontSize: 12 },
-  memberStreetTime: { fontFamily: FONTS.bold, color: COLORS.ink, fontSize: 13, lineHeight: 18, marginTop: 8, textAlign: 'center' },
-  memberStickyFade: { backgroundColor: 'rgba(255,255,255,0.92)', paddingTop: 10, marginHorizontal: -20, paddingHorizontal: 20 },
-  memberStickyRow: { flexDirection: 'row', gap: 10, paddingBottom: 2, alignItems: 'center' },
-  memberTrailPill: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.white, borderRadius: RADII.pill, paddingVertical: 14, paddingHorizontal: 18, ...SHADOWS.floating },
-  memberTrailPillText: { fontFamily: FONTS.heavy, color: COLORS.ink, fontSize: 13, flexShrink: 1 },
-  memberHistoryCard: { backgroundColor: COLORS.white, borderRadius: RADII.card, padding: 16, marginTop: 10, ...SHADOWS.card },
-  memberHistoryTitle: { fontFamily: FONTS.heavy, color: COLORS.ink, fontSize: 15 },
-  memberHistorySubtitle: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 11, marginTop: 4, marginBottom: 6 },
-  memberHistoryRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingVertical: 9 },
-  memberHistoryDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: COLORS.purple, marginTop: 4 },
-  memberHistoryCopy: { flex: 1 },
-  memberHistoryTime: { fontFamily: FONTS.bold, color: COLORS.ink, fontSize: 12 },
-  memberHistoryCoords: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 11, marginTop: 2, fontVariant: ['tabular-nums'] },
-  modalClose: { width: 48, height: 48, borderRadius: RADII.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.white },
-  memberSheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 },
-  memberSheetCopy: { flex: 1, marginLeft: 13 },
-  memberSheetRole: { fontFamily: FONTS.regular, color: COLORS.muted, fontSize: 12, marginTop: 5 },
-  memberDetailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 20, marginBottom: 8 },
-  trailButton: { height: 50, backgroundColor: COLORS.purple, borderRadius: RADII.pill, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 },
-  trailButtonText: { fontFamily: FONTS.heavy, color: COLORS.white, fontWeight: 'normal', fontSize: 13, flex: 1, textAlign: 'center' },
-  detailStat: { width: '48%', flexGrow: 1, backgroundColor: COLORS.lavender, borderRadius: RADII.card, minHeight: 86, padding: 12, ...SHADOWS.card },
-  detailStatLabel: { fontFamily: FONTS.bold, color: COLORS.muted, fontSize: 10, marginTop: 8 },
-  detailStatValue: { fontFamily: FONTS.heavy, color: COLORS.ink, fontSize: 12, marginTop: 3, lineHeight: 16 },
+    appRoot: { flex: 1, backgroundColor: COLORS.canvas },
+    mapAppRoot: { backgroundColor: COLORS.mapLand },
+    emptyNote: {
+        fontFamily: FONTS.regular,
+        color: COLORS.muted,
+        fontSize: 12,
+        lineHeight: 18,
+        marginBottom: 18,
+    },
+    mainContent: { flex: 1 },
+    header: {
+        height: 80,
+        backgroundColor: COLORS.white,
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: 24,
+    },
+    brandMark: {
+        width: 40,
+        height: 40,
+        borderRadius: RADII.card,
+        backgroundColor: COLORS.purple,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    brandCopy: { marginLeft: 10, flex: 1 },
+    brandName: {
+        fontFamily: FONTS.heavy,
+        fontSize: 19,
+        fontWeight: "normal",
+        color: COLORS.ink,
+        letterSpacing: -0.4,
+    },
+    brandSubline: {
+        fontFamily: FONTS.bold,
+        color: COLORS.subtle,
+        fontWeight: "normal",
+        fontSize: 8.5,
+        letterSpacing: 1.5,
+        marginTop: 3,
+    },
+    headerAvatarButton: {
+        borderRadius: RADII.card,
+        minWidth: 48,
+        minHeight: 48,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    contentScreen: { flex: 1, backgroundColor: COLORS.canvas },
+    contentContainer: { padding: 20, paddingBottom: 34 },
+    sectionTitleRow: {
+        flexDirection: "row",
+        alignItems: "flex-end",
+        justifyContent: "space-between",
+        marginBottom: 14,
+        marginTop: 8,
+    },
+    eyebrow: {
+        fontFamily: FONTS.heavy,
+        fontSize: 10,
+        color: COLORS.subtle,
+        fontWeight: "normal",
+        letterSpacing: 1.4,
+        marginBottom: 5,
+    },
+    sectionTitle: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.ink,
+        fontSize: 25,
+        lineHeight: 29,
+        fontWeight: "normal",
+        letterSpacing: -0.6,
+    },
+    actionText: {
+        fontFamily: FONTS.bold,
+        color: COLORS.purple,
+        fontWeight: "normal",
+        fontSize: 14,
+        minHeight: 48,
+        textAlignVertical: "center",
+        paddingTop: 12,
+    },
+    avatar: {
+        alignItems: "center",
+        justifyContent: "center",
+        borderWidth: 2,
+        borderColor: COLORS.white,
+        position: "relative",
+    },
+    avatarText: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.white,
+        fontWeight: "normal",
+        letterSpacing: -0.5,
+    },
+    onlineDot: {
+        position: "absolute",
+        right: -1,
+        bottom: 0,
+        width: 12,
+        height: 12,
+        backgroundColor: COLORS.mint,
+        borderRadius: 6,
+        borderWidth: 2,
+        borderColor: COLORS.white,
+    },
+    mapScreen: { flex: 1, overflow: "hidden", backgroundColor: COLORS.mapLand },
+    mapNoLocation: {
+        position: "absolute",
+        top: "30%",
+        left: 30,
+        right: 30,
+        alignItems: "center",
+        gap: 10,
+    },
+    mapNoLocationText: {
+        fontFamily: FONTS.bold,
+        color: COLORS.deepPurple,
+        fontSize: 15,
+        fontWeight: "normal",
+        textAlign: "center",
+    },
+    mapEmptyOverlay: {
+        position: "absolute",
+        top: 132,
+        left: 16,
+        right: 70,
+        backgroundColor: "rgba(255,255,255,0.95)",
+        borderRadius: RADII.card,
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        ...SHADOWS.floating,
+    },
+    mapEmptyOverlayText: {
+        fontFamily: FONTS.bold,
+        color: COLORS.deepPurple,
+        fontSize: 11,
+        fontWeight: "normal",
+        flex: 1,
+    },
+    mapTopBar: {
+        minHeight: 40,
+        position: "absolute",
+        top: 12,
+        left: 18,
+        right: 18,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+    },
+    mapRoundButton: {
+        width: 36,
+        height: 36,
+        borderRadius: RADII.pill,
+        backgroundColor: COLORS.white,
+        alignItems: "center",
+        justifyContent: "center",
+        ...SHADOWS.floating,
+    },
+    mapTopSpacer: { width: 36 },
+    mapCirclePicker: {
+        flex: 1,
+        maxWidth: 230,
+        minHeight: 36,
+        borderRadius: RADII.pill,
+        backgroundColor: COLORS.white,
+        paddingHorizontal: 13,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 6,
+        ...SHADOWS.floating,
+    },
+    mapCirclePickerText: {
+        fontFamily: FONTS.regular,
+        flex: 1,
+        textAlign: "left",
+        textAlignVertical: "center",
+        includeFontPadding: false,
+        color: COLORS.deepPurple,
+        fontSize: 15,
+        fontWeight: "normal",
+    },
+    mapTopOverlay: {
+        position: "absolute",
+        top: 73,
+        left: 16,
+        right: 70,
+        gap: 8,
+    },
+    safePill: {
+        alignSelf: "flex-start",
+        maxWidth: "100%",
+        backgroundColor: COLORS.white,
+        borderRadius: RADII.pill,
+        paddingVertical: 6,
+        paddingHorizontal: 10,
+        flexDirection: "row",
+        alignItems: "center",
+        ...SHADOWS.floating,
+    },
+    safeIcon: {
+        width: 25,
+        height: 25,
+        borderRadius: 11,
+        alignItems: "center",
+        justifyContent: "center",
+        marginRight: 8,
+    },
+    safePillLabel: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.deepPurple,
+        fontWeight: "normal",
+        fontSize: 10,
+        letterSpacing: 0.8,
+    },
+    safePillValue: {
+        fontFamily: FONTS.regular,
+        color: COLORS.muted,
+        fontSize: 10,
+        marginTop: 2,
+    },
+    locationPrompt: {
+        minHeight: 48,
+        backgroundColor: COLORS.white,
+        borderRadius: RADII.pill,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        flexDirection: "row",
+        alignItems: "center",
+        ...SHADOWS.floating,
+    },
+    trailPill: {
+        minHeight: 48,
+        alignSelf: "flex-start",
+        maxWidth: "100%",
+        backgroundColor: COLORS.ink,
+        borderRadius: RADII.pill,
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 7,
+        ...SHADOWS.floating,
+    },
+    trailPillText: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.white,
+        fontWeight: "normal",
+        fontSize: 11,
+        flexShrink: 1,
+    },
+    trailStartDot: {
+        width: 14,
+        height: 14,
+        borderRadius: 7,
+        borderWidth: 3,
+        borderColor: COLORS.white,
+    },
+    locationPromptText: {
+        fontFamily: FONTS.bold,
+        flex: 1,
+        marginLeft: 8,
+        color: COLORS.deepPurple,
+        fontWeight: "normal",
+        fontSize: 12,
+    },
+    mapControls: { position: "absolute", right: 16, bottom: 362 },
+    mapControlButton: {
+        width: 52,
+        height: 52,
+        borderRadius: RADII.pill,
+        backgroundColor: COLORS.white,
+        alignItems: "center",
+        justifyContent: "center",
+        ...SHADOWS.floating,
+    },
+    mapMarker: {
+        width: 66,
+        height: 66,
+        borderRadius: 22,
+        alignItems: "center",
+        justifyContent: "center",
+        borderWidth: 4,
+        borderColor: COLORS.white,
+        ...SHADOWS.floating,
+    },
+    mapMarkerRow: {
+        width: 184,
+        height: 86,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+    },
+    mapAvatarColumn: { width: 66, alignItems: "center" },
+    mapBattery: {
+        fontFamily: FONTS.regular,
+        height: 16,
+        paddingHorizontal: 5,
+        borderRadius: 5,
+        backgroundColor: COLORS.white,
+        color: COLORS.ink,
+        fontSize: 11,
+        textAlign: "center",
+    },
+    mapMovementBadge: {
+        width: 108,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 4,
+        backgroundColor: COLORS.white,
+        borderRadius: RADII.card,
+        paddingVertical: 7,
+        borderColor: COLORS.border,
+    },
+    mapSpeedText: {
+        fontFamily: FONTS.bold,
+        color: COLORS.ink,
+        fontSize: 12,
+        fontWeight: "normal",
+        fontVariant: ["tabular-nums"],
+    },
+    mapMarkerStale: { opacity: 0.52 },
+    mapMarkerText: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.white,
+        fontSize: 23,
+        fontWeight: "normal",
+        letterSpacing: -0.5,
+    },
+    mapAttribution: {
+        position: "absolute",
+        bottom: 346,
+        left: 7,
+        backgroundColor: "rgba(255,255,255,0.85)",
+        paddingHorizontal: 5,
+        paddingVertical: 2,
+        borderRadius: 4,
+    },
+    attributionText: {
+        fontFamily: FONTS.regular,
+        color: COLORS.muted,
+        fontSize: 8,
+    },
+    mapActions: {
+        position: "absolute",
+        bottom: 300,
+        left: 16,
+        right: 16,
+        flexDirection: "row",
+        gap: 10,
+    },
+    mapActionButton: {
+        flex: 1,
+        minHeight: 52,
+        borderRadius: RADII.pill,
+        backgroundColor: COLORS.white,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        paddingHorizontal: 12,
+        ...SHADOWS.floating,
+    },
+    mapActionText: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.purple,
+        fontSize: 13,
+        fontWeight: "normal",
+    },
+    mapBottomCard: {
+        position: "absolute",
+        left: 18,
+        right: 18,
+        bottom: 0,
+        backgroundColor: "#FAF9FC",
+        borderTopLeftRadius: 34,
+        borderTopRightRadius: 34,
+        paddingHorizontal: 18,
+        paddingBottom: 8,
+        ...SHADOWS.sheet,
+    },
+    cardHandleHit: { height: 44, marginHorizontal: -18 },
+    cardHandleButton: {
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    cardHandle: {
+        width: 34,
+        height: 4,
+        borderRadius: RADII.pill,
+        backgroundColor: "#CCCACF",
+    },
+    mapBottomHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        marginBottom: 14,
+    },
+    mapBottomHeaderCopy: { flex: 1 },
+    mapBottomTitle: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.ink,
+        fontSize: 22,
+        fontWeight: "normal",
+        letterSpacing: -0.6,
+    },
+    mapBottomSubtitle: {
+        fontFamily: FONTS.regular,
+        color: COLORS.muted,
+        fontSize: 12,
+        marginTop: 2,
+    },
+    mapPanelArrow: {
+        width: 48,
+        height: 48,
+        borderRadius: RADII.pill,
+        backgroundColor: COLORS.white,
+        alignItems: "center",
+        justifyContent: "center",
+        ...SHADOWS.card,
+    },
+    mapMemberScroll: {
+        flex: 1,
+        borderRadius: 26,
+        backgroundColor: COLORS.white,
+        borderWidth: 1,
+        borderColor: "#DEDAE3",
+        ...SHADOWS.card,
+    },
+    mapMemberList: { paddingHorizontal: 18, paddingVertical: 8, flexGrow: 1 },
+    mapMemberRow: {
+        minHeight: 96,
+        paddingVertical: 12,
+        flexDirection: "row",
+        alignItems: "center",
+    },
+    mapMemberCopy: { flex: 1, marginLeft: 13 },
+    mapMemberName: {
+        fontFamily: FONTS.bold,
+        color: COLORS.ink,
+        fontSize: 18,
+        fontWeight: "normal",
+    },
+    mapMemberStatus: {
+        fontFamily: FONTS.regular,
+        color: COLORS.muted,
+        fontSize: 14,
+        marginTop: 2,
+    },
+    mapFilterEmpty: {
+        flex: 1,
+        minHeight: 100,
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6,
+        paddingVertical: 14,
+    },
+    mapPlaceIcon: {
+        width: 64,
+        height: 64,
+        backgroundColor: COLORS.purpleSoft,
+        borderRadius: 22,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    mapEmptySettings: { alignItems: "center" },
+    mapPanelActions: {
+        flexDirection: "row",
+        justifyContent: "space-around",
+        paddingTop: 4,
+    },
+    mapPanelAction: {
+        minHeight: 44,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6,
+        paddingHorizontal: 8,
+    },
+    mapPanelActionText: {
+        fontFamily: FONTS.medium,
+        fontSize: 11,
+        color: COLORS.purple,
+    },
+    mapEmptyCard: {
+        backgroundColor: COLORS.white,
+        borderRadius: RADII.card,
+        minHeight: 104,
+        paddingHorizontal: 18,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        ...SHADOWS.card,
+    },
+    mapEmptyCopy: { flex: 1 },
+    mapEmptyTitle: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.deepPurple,
+        fontSize: 14,
+        fontWeight: "normal",
+    },
+    mapEmptyText: {
+        fontFamily: FONTS.regular,
+        color: COLORS.muted,
+        fontSize: 11,
+        marginTop: 4,
+    },
+    circleHero: {
+        backgroundColor: COLORS.ink,
+        borderRadius: RADII.card,
+        padding: 18,
+        flexDirection: "row",
+        alignItems: "center",
+        marginBottom: 26,
+        ...SHADOWS.card,
+    },
+    circleHeroOrb: {
+        width: 52,
+        height: 52,
+        borderRadius: RADII.card,
+        backgroundColor: COLORS.coral,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    circleHeroCopy: { flex: 1, paddingLeft: 13, paddingRight: 8 },
+    circleHeroTitle: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.white,
+        fontWeight: "normal",
+        fontSize: 16,
+        marginBottom: 4,
+    },
+    circleHeroBody: {
+        fontFamily: FONTS.regular,
+        color: COLORS.purpleSoft,
+        fontSize: 11.5,
+        lineHeight: 17,
+    },
+    circleInviteSmall: {
+        width: 48,
+        height: 48,
+        borderRadius: RADII.pill,
+        backgroundColor: COLORS.white,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    memberList: {
+        backgroundColor: COLORS.white,
+        borderRadius: RADII.card,
+        paddingHorizontal: 18,
+        paddingVertical: 8,
+        marginBottom: 16,
+        ...SHADOWS.card,
+    },
+    memberRow: { minHeight: 88, flexDirection: "row", alignItems: "center" },
+    memberRowLast: { borderBottomWidth: 0 },
+    memberCopy: { flex: 1, marginLeft: 12 },
+    memberNameRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+    memberName: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.ink,
+        fontWeight: "normal",
+        fontSize: 14,
+    },
+    youLabel: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.coral,
+        fontSize: 8,
+        letterSpacing: 0.7,
+        fontWeight: "normal",
+    },
+    memberStatus: {
+        fontFamily: FONTS.regular,
+        color: COLORS.muted,
+        fontSize: 11.5,
+        marginTop: 5,
+    },
+    memberTrailing: { alignItems: "flex-end", gap: 7 },
+    inviteButton: {
+        height: 54,
+        borderRadius: RADII.pill,
+        backgroundColor: COLORS.coralSoft,
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: 16,
+        marginBottom: 19,
+        gap: 9,
+        ...SHADOWS.card,
+    },
+    inviteButtonText: {
+        fontFamily: FONTS.heavy,
+        flex: 1,
+        color: COLORS.coral,
+        fontWeight: "normal",
+        fontSize: 13,
+    },
+    timelineLabel: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.subtle,
+        fontSize: 10,
+        fontWeight: "normal",
+        letterSpacing: 1.3,
+        marginBottom: 13,
+    },
+    timeline: {
+        backgroundColor: COLORS.white,
+        borderRadius: RADII.card,
+        padding: 17,
+        marginBottom: 13,
+        ...SHADOWS.card,
+    },
+    timelineItem: { flexDirection: "row", minHeight: 76 },
+    timelineRail: { width: 36, alignItems: "center" },
+    timelineIcon: {
+        width: 34,
+        height: 34,
+        borderRadius: 12,
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1,
+    },
+    timelineLine: {
+        position: "absolute",
+        top: 34,
+        bottom: -2,
+        width: 1,
+        backgroundColor: COLORS.border,
+    },
+    timelineCopy: { flex: 1, marginLeft: 10 },
+    timelineTime: {
+        fontFamily: FONTS.bold,
+        color: COLORS.subtle,
+        fontSize: 10,
+        fontWeight: "normal",
+    },
+    timelineTitle: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.ink,
+        fontWeight: "normal",
+        fontSize: 13,
+        marginTop: 3,
+    },
+    timelineBody: {
+        fontFamily: FONTS.regular,
+        color: COLORS.muted,
+        fontSize: 11,
+        marginTop: 4,
+    },
+    fullWidthAction: {
+        height: 53,
+        backgroundColor: COLORS.white,
+        borderRadius: RADII.pill,
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: 15,
+        gap: 9,
+        ...SHADOWS.card,
+    },
+    fullWidthActionText: {
+        fontFamily: FONTS.heavy,
+        flex: 1,
+        color: COLORS.ink,
+        fontWeight: "normal",
+        fontSize: 12.5,
+    },
+    profileCard: {
+        backgroundColor: COLORS.white,
+        borderRadius: RADII.card,
+        padding: 16,
+        flexDirection: "row",
+        alignItems: "center",
+        marginBottom: 20,
+        ...SHADOWS.card,
+    },
+    profileCopy: { flex: 1, marginLeft: 13 },
+    profileName: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.ink,
+        fontWeight: "normal",
+        fontSize: 17,
+    },
+    profileEmail: {
+        fontFamily: FONTS.regular,
+        color: COLORS.muted,
+        fontSize: 11,
+        marginTop: 4,
+    },
+    profileStatus: {
+        flexDirection: "row",
+        alignItems: "center",
+        marginTop: 9,
+        gap: 5,
+    },
+    profileStatusDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: COLORS.mint,
+    },
+    profileStatusText: {
+        fontFamily: FONTS.bold,
+        color: COLORS.mint,
+        fontSize: 10,
+        fontWeight: "normal",
+    },
+    profileStatusInactive: { backgroundColor: COLORS.subtle },
+    profileStatusTextInactive: { color: COLORS.muted },
+    settingsCard: {
+        backgroundColor: COLORS.white,
+        borderRadius: RADII.card,
+        paddingHorizontal: 15,
+        marginBottom: 20,
+        ...SHADOWS.card,
+    },
+    settingRow: { minHeight: 72, flexDirection: "row", alignItems: "center" },
+    settingIcon: {
+        width: 39,
+        height: 39,
+        borderRadius: 13,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    settingCopy: { flex: 1, marginLeft: 11, paddingRight: 10 },
+    settingTitle: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.ink,
+        fontWeight: "normal",
+        fontSize: 13,
+    },
+    settingDescription: {
+        fontFamily: FONTS.regular,
+        color: COLORS.muted,
+        fontSize: 10.5,
+        marginTop: 4,
+        lineHeight: 15,
+    },
+    settingsDivider: {
+        height: 1,
+        backgroundColor: COLORS.border,
+        marginLeft: 50,
+    },
+    statusCheck: {
+        width: 28,
+        height: 28,
+        borderRadius: 10,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    privacyNote: {
+        flexDirection: "row",
+        backgroundColor: COLORS.purpleSoft,
+        borderRadius: RADII.card,
+        padding: 13,
+        marginBottom: 16,
+        gap: 8,
+    },
+    privacyText: {
+        fontFamily: FONTS.regular,
+        flex: 1,
+        color: COLORS.muted,
+        fontSize: 10.5,
+        lineHeight: 15,
+    },
+    versionText: {
+        fontFamily: FONTS.regular,
+        color: COLORS.subtle,
+        fontSize: 10,
+        textAlign: "center",
+        marginTop: 1,
+    },
+    bottomTabs: {
+        minHeight: 80,
+        backgroundColor: COLORS.white,
+        flexDirection: "row",
+        paddingHorizontal: 8,
+        paddingTop: 10,
+        paddingBottom: 8,
+    },
+    tabButton: {
+        flex: 1,
+        minHeight: 56,
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 4,
+    },
+    tabIconWrap: {
+        width: 48,
+        height: 32,
+        borderRadius: RADII.pill,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    tabIconWrapActive: { backgroundColor: COLORS.white },
+    tabLabel: {
+        fontFamily: FONTS.bold,
+        color: COLORS.muted,
+        fontSize: 11,
+        fontWeight: "normal",
+    },
+    tabLabelActive: { color: COLORS.purple },
+    toast: {
+        position: "absolute",
+        bottom: 88,
+        left: 18,
+        right: 18,
+        borderRadius: RADII.card,
+        paddingVertical: 12,
+        paddingHorizontal: 14,
+        backgroundColor: COLORS.ink,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        ...SHADOWS.floating,
+    },
+    toastText: {
+        fontFamily: FONTS.bold,
+        color: COLORS.white,
+        flex: 1,
+        fontSize: 12,
+        fontWeight: "normal",
+        lineHeight: 17,
+    },
+    modalBackdrop: {
+        flex: 1,
+        backgroundColor: "rgba(11, 23, 42, 0.35)",
+        justifyContent: "flex-end",
+    },
+    modalDismissArea: { flex: 1 },
+    checkInSheet: {
+        backgroundColor: COLORS.canvas,
+        borderRadius: RADII.sheet,
+        marginHorizontal: 12,
+        marginBottom: 12,
+        paddingHorizontal: 24,
+        paddingTop: 12,
+        paddingBottom: 28,
+        ...SHADOWS.sheet,
+    },
+    sheetHandle: {
+        width: 38,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: COLORS.handle,
+        alignSelf: "center",
+        marginBottom: 20,
+    },
+    sheetIcon: {
+        width: 62,
+        height: 62,
+        borderRadius: RADII.card,
+        backgroundColor: COLORS.mintSoft,
+        alignItems: "center",
+        justifyContent: "center",
+        alignSelf: "center",
+        marginBottom: 12,
+    },
+    sheetTitle: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.ink,
+        fontSize: 22,
+        fontWeight: "normal",
+        textAlign: "center",
+        letterSpacing: -0.5,
+    },
+    sheetBody: {
+        fontFamily: FONTS.regular,
+        color: COLORS.muted,
+        fontSize: 12,
+        lineHeight: 18,
+        textAlign: "center",
+        marginTop: 8,
+        marginHorizontal: 14,
+    },
+    messageInput: {
+        fontFamily: FONTS.regular,
+        minHeight: 80,
+        backgroundColor: COLORS.white,
+        borderRadius: RADII.card,
+        padding: 16,
+        color: COLORS.ink,
+        fontSize: 14,
+        marginTop: 18,
+        textAlignVertical: "top",
+    },
+    confirmCheckIn: {
+        height: 50,
+        backgroundColor: COLORS.coral,
+        borderRadius: RADII.pill,
+        marginTop: 12,
+        alignItems: "center",
+        justifyContent: "center",
+        flexDirection: "row",
+        gap: 8,
+    },
+    confirmCheckInText: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.white,
+        fontWeight: "normal",
+        fontSize: 13,
+    },
+    cancelButton: {
+        minHeight: 48,
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 14,
+    },
+    cancelButtonText: {
+        fontFamily: FONTS.bold,
+        color: COLORS.muted,
+        fontWeight: "normal",
+        fontSize: 12,
+    },
+    memberSheet: {
+        backgroundColor: COLORS.white,
+        borderTopLeftRadius: RADII.sheetLarge,
+        borderTopRightRadius: RADII.sheetLarge,
+        marginHorizontal: 0,
+        marginBottom: 0,
+        paddingHorizontal: 20,
+        paddingTop: 8,
+        paddingBottom: 20,
+        maxHeight: "88%",
+        ...SHADOWS.sheet,
+    },
+    memberSheetHandle: {
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: COLORS.handle,
+        alignSelf: "center",
+        marginTop: 4,
+        marginBottom: 10,
+    },
+    memberTopBar: {
+        backgroundColor: COLORS.white,
+        flexDirection: "row",
+        alignItems: "center",
+        paddingVertical: 6,
+        marginBottom: 0,
+    },
+    memberBackButton: {
+        width: 48,
+        height: 48,
+        borderRadius: RADII.pill,
+        backgroundColor: COLORS.white,
+        alignItems: "center",
+        justifyContent: "center",
+        ...SHADOWS.card,
+    },
+    memberTopBarCopy: { flex: 1, marginHorizontal: 8, alignItems: "center" },
+    memberTopBarName: {
+        fontFamily: FONTS.regular,
+        color: COLORS.ink,
+        fontSize: 15,
+        textAlign: "center",
+    },
+    memberTopBarSubtitle: {
+        fontFamily: FONTS.regular,
+        color: COLORS.muted,
+        fontSize: 11,
+        marginTop: 2,
+        textAlign: "center",
+    },
+    memberTopBarSpacer: { width: 48 },
+    mapMemberHeader: {
+        position: "absolute",
+        left: 16,
+        right: 16,
+        minHeight: 56,
+        backgroundColor: COLORS.white,
+        borderRadius: RADII.pill,
+        paddingVertical: 6,
+        paddingLeft: 6,
+        paddingRight: 6,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+        ...SHADOWS.floating,
+        zIndex: 10,
+    },
+    mapMemberBack: {
+        width: 44,
+        height: 44,
+        borderRadius: RADII.pill,
+        backgroundColor: COLORS.white,
+        alignItems: "center",
+        justifyContent: "center",
+        ...SHADOWS.card,
+    },
+    mapMemberHeaderCopy: {
+        flex: 1,
+        marginHorizontal: 2,
+        justifyContent: "center",
+    },
+    mapMemberHeaderName: {
+        fontFamily: FONTS.regular,
+        color: COLORS.ink,
+        fontSize: 15,
+    },
+    mapMemberHeaderSubtitle: {
+        fontFamily: FONTS.regular,
+        color: COLORS.muted,
+        fontSize: 11,
+        marginTop: 2,
+    },
+    mapMemberRefresh: {
+        width: 44,
+        height: 44,
+        borderRadius: RADII.pill,
+        backgroundColor: COLORS.purple,
+        alignItems: "center",
+        justifyContent: "center",
+        ...SHADOWS.card,
+    },
+    mapMemberSheet: {
+        position: "absolute",
+        left: 12,
+        right: 12,
+        bottom: 0,
+        backgroundColor: COLORS.white,
+        borderTopLeftRadius: RADII.sheetLarge,
+        borderTopRightRadius: RADII.sheetLarge,
+        paddingHorizontal: 20,
+        paddingTop: 8,
+        paddingBottom: 20,
+        maxHeight: "52%",
+        ...SHADOWS.sheet,
+        zIndex: 10,
+    },
+    mapMemberSheetBase: {
+        position: "absolute",
+        bottom: 0,
+        backgroundColor: COLORS.white,
+        paddingHorizontal: 20,
+        paddingTop: 8,
+        paddingBottom: 20,
+        ...SHADOWS.sheet,
+        zIndex: 10,
+    },
+    mapMemberHandleRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        marginBottom: 2,
+    },
+    mapMemberHandleHit: {
+        flex: 1,
+        height: 48,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    mapMemberHandleBar: {
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: COLORS.handle,
+    },
+    mapMemberToggle: {
+        width: 44,
+        height: 44,
+        borderRadius: RADII.pill,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    memberAvatarOverlap: {
+        alignItems: "center",
+        marginTop: -6,
+        marginBottom: 10,
+    },
+    memberAvatarRing: {
+        borderRadius: RADII.pill,
+        borderWidth: 4,
+        borderColor: COLORS.white,
+        ...SHADOWS.floating,
+    },
+    memberSheetScroll: { flexGrow: 0, flexShrink: 1 },
+    memberSheetScrollContent: { paddingBottom: 12 },
+    memberSheetName: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.ink,
+        fontSize: 24,
+        letterSpacing: -0.6,
+        flexShrink: 1,
+    },
+    memberDetailNameRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        flex: 1,
+        marginRight: 10,
+    },
+    memberOnlineDot: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        backgroundColor: COLORS.online,
+        borderWidth: 2,
+        borderColor: COLORS.white,
+    },
+    memberOnlineDotOff: { backgroundColor: COLORS.subtle },
+    memberBatteryPill: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 5,
+        backgroundColor: COLORS.white,
+        borderWidth: 1,
+        borderColor: "#E4E0EC",
+        borderRadius: RADII.pill,
+        paddingVertical: 7,
+        paddingHorizontal: 12,
+        ...SHADOWS.card,
+    },
+    memberBatteryText: {
+        fontFamily: FONTS.bold,
+        color: COLORS.deepPurple,
+        fontSize: 12,
+    },
+    memberStreetTime: {
+        fontFamily: FONTS.bold,
+        color: COLORS.ink,
+        fontSize: 13,
+        lineHeight: 18,
+        marginTop: 8,
+        textAlign: "center",
+    },
+    memberStickyFade: {
+        backgroundColor: "rgba(255,255,255,0.92)",
+        paddingTop: 10,
+        marginHorizontal: -20,
+        paddingHorizontal: 20,
+    },
+    memberStickyRow: {
+        flexDirection: "row",
+        gap: 10,
+        paddingBottom: 2,
+        alignItems: "center",
+    },
+    memberTrailPill: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        backgroundColor: COLORS.white,
+        borderRadius: RADII.pill,
+        paddingVertical: 14,
+        paddingHorizontal: 18,
+        ...SHADOWS.floating,
+    },
+    memberTrailPillText: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.ink,
+        fontSize: 13,
+        flexShrink: 1,
+    },
+    memberHistoryCard: {
+        backgroundColor: COLORS.white,
+        borderRadius: RADII.card,
+        padding: 16,
+        marginTop: 10,
+        ...SHADOWS.card,
+    },
+    memberHistoryTitle: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.ink,
+        fontSize: 15,
+    },
+    memberHistorySubtitle: {
+        fontFamily: FONTS.regular,
+        color: COLORS.muted,
+        fontSize: 11,
+        marginTop: 4,
+        marginBottom: 6,
+    },
+    memberHistoryRow: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: 10,
+        paddingVertical: 9,
+    },
+    memberHistoryDot: {
+        width: 9,
+        height: 9,
+        borderRadius: 5,
+        backgroundColor: COLORS.purple,
+        marginTop: 4,
+    },
+    memberHistoryCopy: { flex: 1 },
+    memberHistoryTime: {
+        fontFamily: FONTS.bold,
+        color: COLORS.ink,
+        fontSize: 12,
+    },
+    memberHistoryCoords: {
+        fontFamily: FONTS.regular,
+        color: COLORS.muted,
+        fontSize: 11,
+        marginTop: 2,
+        fontVariant: ["tabular-nums"],
+    },
+    modalClose: {
+        width: 48,
+        height: 48,
+        borderRadius: RADII.pill,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: COLORS.white,
+    },
+    memberSheetHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginTop: 2,
+    },
+    memberSheetCopy: { flex: 1, marginLeft: 13 },
+    memberSheetRole: {
+        fontFamily: FONTS.regular,
+        color: COLORS.muted,
+        fontSize: 12,
+        marginTop: 5,
+    },
+    memberDetailGrid: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 10,
+        marginTop: 20,
+        marginBottom: 8,
+    },
+    trailButton: {
+        height: 50,
+        backgroundColor: COLORS.purple,
+        borderRadius: RADII.pill,
+        alignItems: "center",
+        justifyContent: "center",
+        flexDirection: "row",
+        gap: 8,
+    },
+    trailButtonText: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.white,
+        fontWeight: "normal",
+        fontSize: 13,
+        flex: 1,
+        textAlign: "center",
+    },
+    detailStat: {
+        width: "48%",
+        flexGrow: 1,
+        backgroundColor: COLORS.lavender,
+        borderRadius: RADII.card,
+        minHeight: 86,
+        padding: 12,
+        ...SHADOWS.card,
+    },
+    detailStatLabel: {
+        fontFamily: FONTS.bold,
+        color: COLORS.muted,
+        fontSize: 10,
+        marginTop: 8,
+    },
+    detailStatValue: {
+        fontFamily: FONTS.heavy,
+        color: COLORS.ink,
+        fontSize: 12,
+        marginTop: 3,
+        lineHeight: 16,
+    },
 });

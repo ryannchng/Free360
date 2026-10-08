@@ -1,29 +1,39 @@
-import * as Location from 'expo-location';
-import * as TaskManager from 'expo-task-manager';
-import { loadCircle, publishLocation } from './circle';
-import { flushHomeAlerts } from './home-alerts';
-import { locationWithMovement } from './location-movement';
+import * as Location from "expo-location";
+import * as TaskManager from "expo-task-manager";
+import { loadCircle, publishLocation } from "./circle";
+import { flushHomeAlerts } from "./home-alerts";
+import { locationWithMovement } from "./location-movement";
 
-export const BACKGROUND_LOCATION_TASK = 'free360-background-location';
+export const BACKGROUND_LOCATION_TASK = "free360-background-location";
 
 // The root layout imports this module even when no screen is mounted.
-TaskManager.defineTask<{ locations?: Location.LocationObject[] }>(BACKGROUND_LOCATION_TASK, async ({ data, error }) => {
-  if (error) {
-    console.warn('[Free360] Background location error:', error.message);
-    return;
-  }
-  const latest = data?.locations?.at(-1);
-  if (!latest) return;
-  try {
-    await publishStoredLocation(latest);
-  } catch (publishError) {
-    console.warn('[Free360] Background location queued for retry:', publishError);
-  }
-});
+TaskManager.defineTask<{ locations?: Location.LocationObject[] }>(
+    BACKGROUND_LOCATION_TASK,
+    async ({ data, error }) => {
+        if (error) {
+            console.warn("[Free360] Background location error:", error.message);
+            return;
+        }
+        const latest = data?.locations?.at(-1);
+        if (!latest) return;
+        try {
+            await publishStoredLocation(latest);
+        } catch (publishError) {
+            console.warn(
+                "[Free360] Background location queued for retry:",
+                publishError,
+            );
+        }
+    },
+);
 
 export async function publishStoredLocation(location: Location.LocationObject) {
-  const circle = await loadCircle();
-  if (!circle) return;
-  await publishLocation(circle, locationWithMovement(location), new Date(location.timestamp).toISOString());
-  await flushHomeAlerts();
+    const circle = await loadCircle();
+    if (!circle) return;
+    await publishLocation(
+        circle,
+        locationWithMovement(location),
+        new Date(location.timestamp).toISOString(),
+    );
+    await flushHomeAlerts();
 }

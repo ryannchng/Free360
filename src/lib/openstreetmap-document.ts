@@ -1,6 +1,6 @@
-import { COLORS } from '../theme';
-import { batteryDisplay } from './battery-display';
-import leaflet from '../../assets/leaflet/bundle.json';
+import { COLORS } from "../theme";
+import { batteryDisplay } from "./battery-display";
+import leaflet from "../../assets/leaflet/bundle.json";
 
 // No remote scripts run in the map: decrypted member data stays in this document.
 export const OPENSTREETMAP_HTML = `<!doctype html><html><head>

@@ -13,24 +13,25 @@ For the Supabase option, **one project can host multiple independent circles**. 
 1. Create a Supabase project. Enable **Anonymous Sign-Ins** under Authentication settings -> Sign In/Providers.
 2. In the project's SQL Editor, run [`supabase/schema.sql`](supabase/schema.sql), then [`supabase/multi-circle.sql`](supabase/multi-circle.sql), then [`supabase/setup-code-security.sql`](supabase/setup-code-security.sql), in that order. The scripts are idempotent and converge to the same secure state; re-running `schema.sql` after updating the app (for example to pick up new schema such as 24-hour location history) never undoes the setup-code hardening, and re-running the hardening script never affects codes issued after it. For an existing project, applying these scripts preserves its circles and data while removing the singleton limit. Then run:
 
-   ```sql
-   select public.free360_new_setup_code();
-   ```
+    ```sql
+    select public.free360_new_setup_code();
+    ```
 
-   Copy the returned code privately. It is a single-use 16-digit code (shown grouped as `XXXX-XXXX-XXXX-XXXX`) that expires after 30 minutes. Run the command again to issue a separate code for another circle. The project stores only sha256 hashes of codes, never plaintext. Members join through the owner's invitation QR and choose their name; device UUIDs come from anonymous authentication.
+    Copy the returned code privately. It is a single-use 16-digit code (shown grouped as `XXXX-XXXX-XXXX-XXXX`) that expires after 30 minutes. Run the command again to issue a separate code for another circle. The project stores only sha256 hashes of codes, never plaintext. Members join through the owner's invitation QR and choose their name; device UUIDs come from anonymous authentication.
+
 3. Install the release APK on the owner's phone. Open **You → Create a private circle**, select **Supabase**, and enter the project's HTTPS URL and **publishable** key (`sb_publishable_…`). Never enter a `service_role` or secret key. Connection settings are saved on the phone; no mobile `.env` or custom build is required.
 4. Enter your display name, circle name and setup code, then create the circle. Deploy the Edge Function in step 6 before doing this.
 5. Open **Invite** to show a one-time QR code. Members install the same APK, choose **I have an invitation QR**, enter their name and scan it. The QR carries the backend type, URL and publishable key as well as the private invitation and circle encryption key. Members do not type server settings. Invitations expire after 15 minutes and can be claimed only once.
 
 6. Deploy the `create-circle` Edge Function. Circle creation goes through this function, which verifies the device's session and redeems the setup code server-side (the legacy direct database call is disabled):
 
-   ```sh
-   npx supabase login
-   npx supabase link --project-ref YOUR_PROJECT_REF
-   npx supabase functions deploy create-circle --no-verify-jwt
-   ```
+    ```sh
+    npx supabase login
+    npx supabase link --project-ref YOUR_PROJECT_REF
+    npx supabase functions deploy create-circle --no-verify-jwt
+    ```
 
-   The function validates the bearer's session with Supabase Auth itself (that is why it deploys with `--no-verify-jwt`), never accepts a client-supplied user identity, and returns sanitized JSON errors. The service-role key stays in the Edge Function environment, never the app. This step is required: without it, creating a circle fails. Re-deploy the function after updating the app.
+    The function validates the bearer's session with Supabase Auth itself (that is why it deploys with `--no-verify-jwt`), never accepts a client-supplied user identity, and returns sanitized JSON errors. The service-role key stays in the Edge Function environment, never the app. This step is required: without it, creating a circle fails. Re-deploy the function after updating the app.
 
 ## Build a shared Android APK
 
