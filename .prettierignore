@@ -1,0 +1,6 @@
+node_modules/
+.expo/
+ios/
+build/
+assets/leaflet/bundle.json
+package-lock.json
